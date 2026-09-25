@@ -130,8 +130,19 @@ export async function fetchTopBitgetSpotTickers(): Promise<SpotTickerItem[]> {
     const json = await res.json();
     if (json.code !== '00000' || !Array.isArray(json.data)) return [];
 
+    const STABLECOINS = ['USDC', 'USDGO', 'FDUSD', 'USDE', 'DAI', 'TUSD', 'EUR', 'BUSD'];
+
     const usdtPairs = json.data
-      .filter((item: any) => item.symbol && item.symbol.endsWith('USDT'))
+      .filter((item: any) => {
+        if (!item.symbol || !item.symbol.endsWith('USDT')) return false;
+        const sym = item.symbol;
+        // Filter out stock synthetic tokens (RSPY, RMU, RNVD, etc.) and underscores
+        if (sym.startsWith('R') && sym.length >= 7 && sym !== 'RENDERUSDT' && sym !== 'RONUSDT') return false;
+        if (sym.includes('_')) return false;
+        const base = sym.replace('USDT', '');
+        if (STABLECOINS.includes(base)) return false;
+        return true;
+      })
       .map((item: any) => {
         const vol = parseFloat(item.usdtVolume || '0');
         const price = parseFloat(item.lastPr || '0');

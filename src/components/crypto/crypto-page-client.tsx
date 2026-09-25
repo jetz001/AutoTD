@@ -247,6 +247,21 @@ export function CryptoPageClient() {
             </div>
           </div>
 
+          {/* Cloudflare 24/7 Edge Status Pill */}
+          <a
+            href="https://bitget-ai-trader.jimwar02.workers.dev/api/status"
+            target="_blank"
+            rel="noreferrer"
+            className="hidden sm:flex items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 text-xs font-bold text-sky-400 hover:bg-sky-500/20 transition-colors"
+            title="Cloudflare Worker รันบนเซิร์ฟเวอร์ Edge 24/7 พร้อม OpenRouter AI วิเคราะห์ทุก 5 นาที"
+          >
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-sky-500"></span>
+            </span>
+            <span>⚡ EDGE BOT: 24/7 AUTO (5m)</span>
+          </a>
+
           {/* Mode Pill */}
           <span className={`rounded-lg px-2.5 py-1 text-xs font-bold border ${
             config.isPaperTrading
