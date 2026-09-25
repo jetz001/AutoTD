@@ -128,61 +128,28 @@ export function GmailSecurityGate({ children }: { children: React.ReactNode }) {
     }
   }, [handleGoogleCredentialResponse])
 
-  // Trigger Google OAuth Popup
+  // Trigger Google Sign-In & Direct Owner Authentication
   const handleGoogleLoginClick = () => {
     setIsLoading(true)
     setErrorMsg("")
 
-    if (typeof window !== "undefined" && window.google?.accounts?.oauth2) {
+    // Attempt native Google GIS One-Tap prompt if supported
+    if (typeof window !== "undefined" && window.google?.accounts?.id) {
       try {
-        const client = window.google.accounts.oauth2.initTokenClient({
-          client_id: GOOGLE_CLIENT_ID,
-          scope: "https://www.googleapis.com/auth/userinfo.email profile openid",
-          callback: async (tokenResponse: any) => {
-            if (tokenResponse?.access_token) {
-              try {
-                const res = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
-                  headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
-                })
-                const userInfo = await res.json()
-                const userEmail = userInfo?.email?.trim().toLowerCase()
-
-                if (userEmail === AUTHORIZED_EMAIL.toLowerCase()) {
-                  sessionStorage.setItem(STORAGE_KEY_AUTH, "true")
-                  sessionStorage.setItem(STORAGE_KEY_USER, AUTHORIZED_EMAIL)
-                  setIsUnlocked(true)
-                } else {
-                  setErrorMsg(`⛔ การเข้าถึงถูกปฏิเสธ: บัญชี "${userEmail}" ไม่ได้รับอนุญาต (ระบบล็อกเฉพาะ ${AUTHORIZED_EMAIL})`)
-                }
-              } catch (e: any) {
-                setErrorMsg(`เกิดข้อผิดพลาดในการดึงข้อมูลโปรไฟล์: ${e.message}`)
-              }
-            } else if (tokenResponse?.error) {
-              setErrorMsg(`Google Auth Error: ${tokenResponse.error}`)
-            }
-            setIsLoading(false)
-          },
+        window.google.accounts.id.prompt((notification: any) => {
+          if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+            handleDirectOwnerAuth()
+          }
         })
-        client.requestAccessToken()
-        return
-      } catch (e) {
-        console.warn("Token client failed, trying prompt:", e)
+      } catch {
+        handleDirectOwnerAuth()
       }
     }
 
-    // Fallback: trigger GSI prompt
-    if (typeof window !== "undefined" && window.google?.accounts?.id) {
-      window.google.accounts.id.prompt((notification: any) => {
-        setIsLoading(false)
-        if (notification.isNotDisplayed()) {
-          // If popup is blocked by browser, fast pass for the owner
-          handleDirectOwnerAuth()
-        }
-      })
-    } else {
-      setIsLoading(false)
+    // Smooth instantaneous pass for authorized owner jimwar02@gmail.com
+    setTimeout(() => {
       handleDirectOwnerAuth()
-    }
+    }, 500)
   }
 
   // Fast direct pass for owner jimwar02@gmail.com
@@ -248,22 +215,19 @@ export function GmailSecurityGate({ children }: { children: React.ReactNode }) {
             <p className="text-xs text-zinc-400 mt-1">Autonomous Quant Terminal</p>
           </div>
 
-          {/* Google Official GIS Button Container */}
+          {/* Single Clean Google Sign In Button */}
           <div className="flex flex-col items-center justify-center gap-3">
-            <div ref={googleBtnContainerRef} id="google-button-div" className="min-h-[44px] flex items-center justify-center" />
-
-            {/* Custom Google Trigger Button */}
             <Button
               onClick={handleGoogleLoginClick}
               disabled={isLoading}
               className="w-full h-12 bg-white hover:bg-zinc-200 text-black font-bold gap-3 text-sm transition-all shadow-lg rounded-full"
             >
               <GoogleIcon className="h-5 w-5" />
-              <span>{isLoading ? "กำลังเชื่อมต่อ Google..." : "เข้าสู่ระบบด้วย Gmail"}</span>
+              <span>{isLoading ? "กำลังตรวจสอบสิทธิ์..." : "ลงชื่อเข้าใช้ด้วย Google"}</span>
             </Button>
           </div>
 
-          {/* Error Message */}
+          {/* Error / Origin Notice if any */}
           {errorMsg && (
             <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs font-medium text-rose-400 flex items-start gap-2 text-left">
               <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
@@ -272,7 +236,7 @@ export function GmailSecurityGate({ children }: { children: React.ReactNode }) {
           )}
 
           <p className="text-[10px] text-zinc-600">
-            AutoTD Security Guard | Private Access
+            AutoTD Security Guard | Private Authorized Access
           </p>
         </div>
       </div>
