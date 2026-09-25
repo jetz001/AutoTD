@@ -7,12 +7,12 @@ interface Env {
 }
 
 const DEFAULT_FREE_MODELS = [
-  "nex-agi/nex-n2.5-mini:free",
-  "nex-agi/nex-n2.5-pro:free",
+  "inclusionai/ling-3.0-flash-fin:free",
   "qwen/qwen3.8-27b:free",
-  "meta-llama/llama-3.3-70b-instruct:free",
-  "google/gemini-2.0-flash-lite-preview-02-05:free",
-  "mistralai/mistral-small-24b-instruct-2501:free",
+  "nvidia/nemotron-3.5-lightning:free",
+  "liquid/lfm-2.5-2.6b:free",
+  "thinkingmachines/inkling-small:free",
+  "inclusionai/ling-3.0-flash-sante:free",
 ];
 
 const corsHeaders = {
