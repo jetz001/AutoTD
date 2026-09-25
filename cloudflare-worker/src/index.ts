@@ -12,6 +12,7 @@ export interface Env {
 
   // AI Secrets
   AI_API_KEY?: string;
+  OPENROUTER_API_KEY?: string;
 
   // Config vars
   TRADING_MODE?: "SPOT" | "FUTURES" | "BOTH";
@@ -19,7 +20,7 @@ export interface Env {
   MAX_LEVERAGE?: string;
   MAX_RISK_PERCENT?: string;
   PAPER_TRADING?: string;
-  AI_PROVIDER?: "openai" | "claude" | "gemini" | "mock";
+  AI_PROVIDER?: "openai" | "claude" | "gemini" | "openrouter" | "mock";
 }
 
 // In-memory trade journal for live UI display
@@ -157,7 +158,8 @@ async function executeTradingCycle(triggerSource: string, env: Env, configOverri
   };
 
   // 1. ให้ AI วิเคราะห์ & ตัดสินใจ
-  const decision: AIDecision = await askTradingAgent(context, provider, env.AI_API_KEY);
+  const aiKey = env.OPENROUTER_API_KEY || env.AI_API_KEY;
+  const decision: AIDecision = await askTradingAgent(context, provider, aiKey);
 
   // 2. ส่ง Order ไป Bitget (ถ้าไม่ใช่ Paper trading และไม่ใช่ HOLD)
   let orderResult = null;

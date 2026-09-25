@@ -26,7 +26,7 @@ export interface MarketContext {
 
 export async function askTradingAgent(
   context: MarketContext,
-  provider: "openai" | "claude" | "gemini" | "mock",
+  provider: "openai" | "claude" | "gemini" | "openrouter" | "mock",
   apiKey?: string
 ): Promise<AIDecision> {
   const prompt = `
@@ -136,6 +136,29 @@ Respond ONLY with a valid JSON object matching this schema:
     const text = data.content[0].text;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     return JSON.parse(jsonMatch ? jsonMatch[0] : text);
+  }
+
+  // 5. OpenRouter Provider
+  if (provider === "openrouter") {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/jetz001/AutoTD",
+        "X-Title": "AutoTD Quant Bot"
+      },
+      body: JSON.stringify({
+        model: "google/gemma-4-31b-it:free",
+        messages: [{ role: "user", content: prompt }],
+        response_format: { type: "json_object" },
+        temperature: 0.2
+      })
+    });
+    const data = await res.json() as any;
+    const content = data.choices?.[0]?.message?.content;
+    const jsonMatch = content?.match(/\{[\s\S]*\}/);
+    return JSON.parse(jsonMatch ? jsonMatch[0] : content);
   }
 
   throw new Error(`Unsupported AI provider: ${provider}`);
