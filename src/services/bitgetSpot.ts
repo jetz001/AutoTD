@@ -131,14 +131,15 @@ export async function fetchTopBitgetSpotTickers(): Promise<SpotTickerItem[]> {
     if (json.code !== '00000' || !Array.isArray(json.data)) return [];
 
     const STABLECOINS = ['USDC', 'USDGO', 'FDUSD', 'USDE', 'DAI', 'TUSD', 'EUR', 'BUSD'];
+    const REAL_R_CRYPTO = ['RENDERUSDT', 'ROSEUSDT', 'RUNEUSDT', 'RONUSDT', 'RAYUSDT', 'REQUSDT'];
 
     const usdtPairs = json.data
       .filter((item: any) => {
         if (!item.symbol || !item.symbol.endsWith('USDT')) return false;
         const sym = item.symbol;
-        // Filter out stock synthetic tokens (RSPY, RMU, RNVD, etc.) and underscores
-        if (sym.startsWith('R') && sym.length >= 7 && sym !== 'RENDERUSDT' && sym !== 'RONUSDT') return false;
         if (sym.includes('_')) return false;
+        // Filter out synthetic stocks starting with R unless verified genuine crypto
+        if (sym.startsWith('R') && !REAL_R_CRYPTO.includes(sym)) return false;
         const base = sym.replace('USDT', '');
         if (STABLECOINS.includes(base)) return false;
         return true;
@@ -210,26 +211,7 @@ export function loadSpotHoldings(): SpotHolding[] {
       return JSON.parse(saved);
     } catch {}
   }
-  // Initial default demonstration holding (e.g. SOL)
-  const defaultHolding: SpotHolding = {
-    symbol: 'SOLUSDT',
-    baseCoin: 'SOL',
-    totalAmount: 12.5,
-    tranchesCount: 2,
-    avgCostPrice: 176.4,
-    totalInvestedUsdt: 2205.0,
-    currentPrice: 182.15,
-    unrealizedPnlUsdt: 71.87,
-    pnlPercent: 3.26,
-    takeProfitPrice: 182.57,
-    cutLossPrice: 167.58,
-    isPaper: true,
-    history: [
-      { price: 178.0, amount: 6.25, time: new Date(Date.now() - 7200000).toLocaleTimeString() },
-      { price: 174.8, amount: 6.25, time: new Date(Date.now() - 3600000).toLocaleTimeString() },
-    ],
-  };
-  return [defaultHolding];
+  return [];
 }
 
 export function saveSpotHoldings(holdings: SpotHolding[]) {

@@ -35,22 +35,30 @@ import {
 export function CryptoPageClient() {
   const [config, setConfig] = React.useState<BitgetConfig>(loadBitgetConfig)
   const [isSettingsOpen, setIsSettingsOpen] = React.useState(false)
-  const [selectedSymbol, setSelectedSymbol] = React.useState("SOLUSDT")
+  const [selectedSymbol, setSelectedSymbol] = React.useState("BTCUSDT")
   const [tickers, setTickers] = React.useState<SpotTickerItem[]>([])
-  const [holdings, setHoldings] = React.useState<SpotHolding[]>(loadSpotHoldings)
+  const [holdings, setHoldings] = React.useState<SpotHolding[]>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("bitget_spot_holdings_v1")
+      if (saved && saved.includes("176.4")) {
+        localStorage.removeItem("bitget_spot_holdings_v1")
+      }
+    }
+    return loadSpotHoldings()
+  })
   const [isScanning, setIsScanning] = React.useState(false)
   const [actionAlert, setActionAlert] = React.useState<string | null>(null)
 
   // Quant Executive State
   const [quantState, setQuantState] = React.useState<QuantExecutiveState>({
     status: "SCANNING",
-    statusMessage: "กำลังสแกนตลาด Top 20 Spot Bitget เพื่อหาจังหวะ Dip in Uptrend",
+    statusMessage: "กำลังสแกนตลาด Top Spot Bitget เพื่อหาจังหวะ Dip in Uptrend",
     roundGoalPercent: config.takeProfitPercent,
-    currentRoundProgressPercent: 3.2,
-    activeCoinsCount: holdings.length,
+    currentRoundProgressPercent: 0,
+    activeCoinsCount: 0,
     maxCoinsLimit: config.maxCoins,
-    totalDeployedUsdt: 2205.0,
-    cashReserveUsdt: 7795.0,
+    totalDeployedUsdt: 0,
+    cashReserveUsdt: getPaperBalance(),
     recentLogs: loadQuantLogs(),
   })
 
