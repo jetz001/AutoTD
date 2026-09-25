@@ -15,21 +15,19 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://shadcn-fintech.vercel.app"),
-  title: "Shadcn Fintech — Finance Dashboard Template",
-  description: "A premium open-source fintech dashboard built with Next.js, shadcn/ui, and Tailwind CSS. 13 pages, drag-and-drop layout, crypto candlestick charts, and more.",
+  metadataBase: new URL("https://autotd.pages.dev"),
+  title: "AutoTD — Autonomous Quant Trading Terminal",
+  description: "Enterprise Bitget Spot Autonomous Quant Trading Terminal with Multi-Model AI Decision Engine.",
   openGraph: {
-    title: "Shadcn Fintech — Finance Dashboard Template",
-    description: "A premium open-source fintech dashboard built with Next.js, shadcn/ui, and Tailwind CSS.",
+    title: "AutoTD — Autonomous Quant Trading Terminal",
+    description: "Enterprise Bitget Spot Autonomous Quant Trading Terminal with Multi-Model AI Decision Engine.",
     type: "website",
-    url: "https://shadcn-fintech.vercel.app",
-    images: [{ url: "/screenshots/shadcn-fintech.png", width: 1200, height: 630 }],
+    url: "https://autotd.pages.dev",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Shadcn Fintech — Finance Dashboard Template",
-    description: "A premium open-source fintech dashboard built with Next.js, shadcn/ui, and Tailwind CSS.",
-    images: ["/screenshots/shadcn-fintech.png"],
+    title: "AutoTD — Autonomous Quant Trading Terminal",
+    description: "Enterprise Bitget Spot Autonomous Quant Trading Terminal with Multi-Model AI Decision Engine.",
   },
 };
 

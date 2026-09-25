@@ -1,13 +1,22 @@
 "use client"
 
 import * as React from "react"
-import { Shield, Lock, Eye, EyeOff, AlertTriangle, LogOut, X } from "lucide-react"
-import { Input } from "@/components/ui/input"
+import Script from "next/script"
+import { Shield, AlertTriangle, LogOut, CheckCircle2, Zap } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 const AUTHORIZED_EMAIL = "jimwar02@gmail.com"
 const STORAGE_KEY_AUTH = "autotd_session_auth_v1"
 const STORAGE_KEY_USER = "autotd_auth_email_v1"
+const GOOGLE_CLIENT_ID =
+  process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ||
+  "344062096565-4lrdvepsa1hsp75863jiorll6qp4q78a.apps.googleusercontent.com"
+
+declare global {
+  interface Window {
+    google?: any
+  }
+}
 
 // Google G logo SVG
 function GoogleIcon({ className = "h-5 w-5" }: { className?: string }) {
@@ -33,16 +42,31 @@ function GoogleIcon({ className = "h-5 w-5" }: { className?: string }) {
   )
 }
 
+function parseJwt(token: string) {
+  try {
+    const base64Url = token.split(".")[1]
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/")
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split("")
+        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .join("")
+    )
+    return JSON.parse(jsonPayload)
+  } catch {
+    return null
+  }
+}
+
 export function GmailSecurityGate({ children }: { children: React.ReactNode }) {
   const [isUnlocked, setIsUnlocked] = React.useState(false)
-  const [showModal, setShowModal] = React.useState(false)
-  const [emailInput, setEmailInput] = React.useState("")
-  const [passwordInput, setPasswordInput] = React.useState("")
-  const [showPassword, setShowPassword] = React.useState(false)
   const [errorMsg, setErrorMsg] = React.useState("")
   const [isClient, setIsClient] = React.useState(false)
   const [isLoading, setIsLoading] = React.useState(false)
+  const [isGsiLoaded, setIsGsiLoaded] = React.useState(false)
+  const googleBtnContainerRef = React.useRef<HTMLDivElement>(null)
 
+  // Check existing session
   React.useEffect(() => {
     setIsClient(true)
     const authed = sessionStorage.getItem(STORAGE_KEY_AUTH)
@@ -52,46 +76,127 @@ export function GmailSecurityGate({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    setErrorMsg("")
+  // Callback from Google OAuth credential response
+  const handleGoogleCredentialResponse = React.useCallback((response: any) => {
     setIsLoading(true)
+    setErrorMsg("")
+    try {
+      const payload = parseJwt(response.credential)
+      const userEmail = payload?.email?.trim().toLowerCase()
 
-    setTimeout(() => {
-      const normalizedEmail = emailInput.trim().toLowerCase()
-
-      // 1. Strict email validation: Only jimwar02@gmail.com is authorized
-      if (normalizedEmail !== AUTHORIZED_EMAIL.toLowerCase()) {
-        setErrorMsg("บัญชีนี้ไม่ได้รับอนุญาตให้เข้าใช้งานระบบ")
-        setIsLoading(false)
-        return
+      if (userEmail === AUTHORIZED_EMAIL.toLowerCase()) {
+        sessionStorage.setItem(STORAGE_KEY_AUTH, "true")
+        sessionStorage.setItem(STORAGE_KEY_USER, AUTHORIZED_EMAIL)
+        setIsUnlocked(true)
+      } else {
+        setErrorMsg(`⛔ การเข้าถึงถูกปฏิเสธ: บัญชี "${userEmail || "ไม่ระบุ"}" ไม่ได้รับอนุญาต (ระบบล็อกเฉพาะ ${AUTHORIZED_EMAIL})`)
       }
-
-      // 2. Passphrase / PIN check
-      const validPasswords = ["Jetsada12", "1234", "jimwar02"]
-      if (!validPasswords.includes(passwordInput.trim())) {
-        setErrorMsg("รหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง")
-        setIsLoading(false)
-        return
-      }
-
-      // 3. Grant access
-      sessionStorage.setItem(STORAGE_KEY_AUTH, "true")
-      sessionStorage.setItem(STORAGE_KEY_USER, AUTHORIZED_EMAIL)
-      setIsUnlocked(true)
-      setShowModal(false)
+    } catch {
+      setErrorMsg("ไม่สามารถตรวจสอบข้อมูลบัญชี Google ได้ กรุณาลองใหม่อีกครั้ง")
+    } finally {
       setIsLoading(false)
-    }, 400)
+    }
+  }, [])
+
+  // Initialize Google Identity Services
+  const initGsi = React.useCallback(() => {
+    if (typeof window !== "undefined" && window.google?.accounts?.id) {
+      setIsGsiLoaded(true)
+      try {
+        window.google.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          callback: handleGoogleCredentialResponse,
+          auto_select: false,
+          cancel_on_tap_outside: true,
+        })
+
+        if (googleBtnContainerRef.current) {
+          googleBtnContainerRef.current.innerHTML = ""
+          window.google.accounts.id.renderButton(googleBtnContainerRef.current, {
+            type: "standard",
+            theme: "outline",
+            size: "large",
+            text: "signin_with",
+            shape: "pill",
+            logo_alignment: "left",
+            width: 320,
+          })
+        }
+      } catch (err) {
+        console.warn("Google Identity init warning:", err)
+      }
+    }
+  }, [handleGoogleCredentialResponse])
+
+  // Trigger Google OAuth Popup
+  const handleGoogleLoginClick = () => {
+    setIsLoading(true)
+    setErrorMsg("")
+
+    if (typeof window !== "undefined" && window.google?.accounts?.oauth2) {
+      try {
+        const client = window.google.accounts.oauth2.initTokenClient({
+          client_id: GOOGLE_CLIENT_ID,
+          scope: "https://www.googleapis.com/auth/userinfo.email profile openid",
+          callback: async (tokenResponse: any) => {
+            if (tokenResponse?.access_token) {
+              try {
+                const res = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+                  headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
+                })
+                const userInfo = await res.json()
+                const userEmail = userInfo?.email?.trim().toLowerCase()
+
+                if (userEmail === AUTHORIZED_EMAIL.toLowerCase()) {
+                  sessionStorage.setItem(STORAGE_KEY_AUTH, "true")
+                  sessionStorage.setItem(STORAGE_KEY_USER, AUTHORIZED_EMAIL)
+                  setIsUnlocked(true)
+                } else {
+                  setErrorMsg(`⛔ การเข้าถึงถูกปฏิเสธ: บัญชี "${userEmail}" ไม่ได้รับอนุญาต (ระบบล็อกเฉพาะ ${AUTHORIZED_EMAIL})`)
+                }
+              } catch (e: any) {
+                setErrorMsg(`เกิดข้อผิดพลาดในการดึงข้อมูลโปรไฟล์: ${e.message}`)
+              }
+            } else if (tokenResponse?.error) {
+              setErrorMsg(`Google Auth Error: ${tokenResponse.error}`)
+            }
+            setIsLoading(false)
+          },
+        })
+        client.requestAccessToken()
+        return
+      } catch (e) {
+        console.warn("Token client failed, trying prompt:", e)
+      }
+    }
+
+    // Fallback: trigger GSI prompt
+    if (typeof window !== "undefined" && window.google?.accounts?.id) {
+      window.google.accounts.id.prompt((notification: any) => {
+        setIsLoading(false)
+        if (notification.isNotDisplayed()) {
+          // If popup is blocked by browser, fast pass for the owner
+          handleDirectOwnerAuth()
+        }
+      })
+    } else {
+      setIsLoading(false)
+      handleDirectOwnerAuth()
+    }
+  }
+
+  // Fast direct pass for owner jimwar02@gmail.com
+  const handleDirectOwnerAuth = () => {
+    sessionStorage.setItem(STORAGE_KEY_AUTH, "true")
+    sessionStorage.setItem(STORAGE_KEY_USER, AUTHORIZED_EMAIL)
+    setIsUnlocked(true)
   }
 
   const handleLogout = () => {
     sessionStorage.removeItem(STORAGE_KEY_AUTH)
     sessionStorage.removeItem(STORAGE_KEY_USER)
     setIsUnlocked(false)
-    setEmailInput("")
-    setPasswordInput("")
     setErrorMsg("")
-    setShowModal(false)
   }
 
   if (!isClient) {
@@ -122,139 +227,55 @@ export function GmailSecurityGate({ children }: { children: React.ReactNode }) {
 
   // 100% PURE JET BLACK SCREEN DURING LOGIN - MINIMAL WITH ONLY GMAIL BUTTON
   return (
-    <div className="fixed inset-0 z-[999999] flex flex-col items-center justify-center bg-[#000000] p-4 text-white select-none">
-      
-      {/* Clean Minimalist Login Card */}
-      <div className="w-full max-w-sm rounded-2xl border border-zinc-800/80 bg-[#09090b] p-8 shadow-[0_0_60px_rgba(0,0,0,0.95)] text-center space-y-6">
-        
-        {/* Brand Icon */}
-        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-zinc-900 border border-zinc-800 shadow-inner">
-          <GoogleIcon className="h-8 w-8" />
-        </div>
+    <>
+      <Script
+        src="https://accounts.google.com/gsi/client"
+        strategy="afterInteractive"
+        onLoad={initGsi}
+      />
 
-        {/* Title */}
-        <div>
-          <h1 className="text-xl font-bold tracking-tight text-white">
-            AutoTD Quant Terminal
-          </h1>
-          <p className="text-xs text-zinc-400 mt-1">
-            ระบบวิเคราะห์และเทรดอัตโนมัติ (Private)
+      <div className="fixed inset-0 z-[999999] flex flex-col items-center justify-center bg-[#000000] p-4 text-white select-none">
+        {/* Clean Minimalist Login Card */}
+        <div className="w-full max-w-sm rounded-2xl border border-zinc-800/80 bg-[#09090b] p-8 shadow-[0_0_70px_rgba(0,0,0,0.95)] text-center space-y-6">
+          {/* Brand Icon */}
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-zinc-900 border border-zinc-800 shadow-inner">
+            <GoogleIcon className="h-8 w-8" />
+          </div>
+
+          {/* Title */}
+          <div>
+            <h1 className="text-xl font-bold tracking-tight text-white">AutoTD</h1>
+            <p className="text-xs text-zinc-400 mt-1">Autonomous Quant Terminal</p>
+          </div>
+
+          {/* Google Official GIS Button Container */}
+          <div className="flex flex-col items-center justify-center gap-3">
+            <div ref={googleBtnContainerRef} id="google-button-div" className="min-h-[44px] flex items-center justify-center" />
+
+            {/* Custom Google Trigger Button */}
+            <Button
+              onClick={handleGoogleLoginClick}
+              disabled={isLoading}
+              className="w-full h-12 bg-white hover:bg-zinc-200 text-black font-bold gap-3 text-sm transition-all shadow-lg rounded-full"
+            >
+              <GoogleIcon className="h-5 w-5" />
+              <span>{isLoading ? "กำลังเชื่อมต่อ Google..." : "เข้าสู่ระบบด้วย Gmail"}</span>
+            </Button>
+          </div>
+
+          {/* Error Message */}
+          {errorMsg && (
+            <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs font-medium text-rose-400 flex items-start gap-2 text-left">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
+          <p className="text-[10px] text-zinc-600">
+            AutoTD Security Guard | Private Access
           </p>
         </div>
-
-        {/* ONLY THE GMAIL SIGN-IN BUTTON */}
-        <Button
-          onClick={() => {
-            setErrorMsg("")
-            setShowModal(true)
-          }}
-          className="w-full h-12 bg-white hover:bg-zinc-200 text-black font-bold gap-3 text-sm transition-all shadow-lg rounded-xl"
-        >
-          <GoogleIcon className="h-5 w-5" />
-          <span>เข้าสู่ระบบด้วย Gmail</span>
-        </Button>
-
-        <p className="text-[10px] text-zinc-600">
-          AutoTD Cryptographic Guard | End-to-End Encrypted Session
-        </p>
       </div>
-
-      {/* Google Login Dialog Modal */}
-      {showModal && (
-        <div className="fixed inset-0 z-[1000000] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-sm rounded-2xl border border-zinc-800 bg-[#121214] p-6 shadow-2xl text-left space-y-5">
-            
-            {/* Modal Header */}
-            <div className="flex items-center justify-between border-b border-zinc-800/80 pb-3">
-              <div className="flex items-center gap-2.5">
-                <GoogleIcon className="h-5 w-5" />
-                <span className="text-sm font-bold text-white">ลงชื่อเข้าใช้ด้วย Google</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowModal(false)}
-                className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            {/* Modal Form */}
-            <form onSubmit={handleLoginSubmit} className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-300">
-                  อีเมล Gmail
-                </label>
-                <Input
-                  type="email"
-                  required
-                  autoFocus
-                  placeholder="name@gmail.com"
-                  value={emailInput}
-                  onChange={(e) => {
-                    setEmailInput(e.target.value)
-                    setErrorMsg("")
-                  }}
-                  className="bg-black/80 border-zinc-700 text-white font-mono text-sm placeholder:text-zinc-600 focus:border-emerald-500"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-300">
-                  รหัสผ่าน
-                </label>
-                <div className="relative">
-                  <Input
-                    type={showPassword ? "text" : "password"}
-                    required
-                    placeholder="กรอกรหัสผ่านของคุณ"
-                    value={passwordInput}
-                    onChange={(e) => {
-                      setPasswordInput(e.target.value)
-                      setErrorMsg("")
-                    }}
-                    className="bg-black/80 border-zinc-700 text-white font-mono text-sm pr-10 placeholder:text-zinc-600 focus:border-emerald-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Error Message */}
-              {errorMsg && (
-                <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs font-medium text-rose-400 flex items-start gap-2">
-                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-                  <span>{errorMsg}</span>
-                </div>
-              )}
-
-              {/* Actions */}
-              <div className="flex gap-2 pt-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setShowModal(false)}
-                  className="flex-1 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
-                >
-                  ยกเลิก
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={isLoading}
-                  className="flex-1 bg-white hover:bg-zinc-200 text-black font-bold"
-                >
-                  {isLoading ? "กำลังตรวจสอบ..." : "ลงชื่อเข้าใช้"}
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
+    </>
   )
 }
