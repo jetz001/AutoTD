@@ -382,8 +382,18 @@ export async function executeRealBitgetOrder(
   },
   config?: BitgetConfig
 ): Promise<{ success: boolean; data?: any; message: string }> {
+  // Ensure credentials are synced
+  let activeConfig = config;
+  if (!activeConfig?.apiKey || !activeConfig?.secretKey) {
+    const synced = await syncBitgetConfigFromCloudflare();
+    if (synced && synced.apiKey) {
+      activeConfig = { ...(config || loadBitgetConfig()), ...synced };
+      saveBitgetConfig(activeConfig as BitgetConfig);
+    }
+  }
+
   // 1. First priority: Direct Browser WebCrypto request (Bypasses Cloudflare Worker WAF blocks)
-  if (config?.apiKey && config?.secretKey && config?.passphrase) {
+  if (activeConfig?.apiKey && activeConfig?.secretKey && activeConfig?.passphrase) {
     try {
       const timestamp = Date.now().toString();
       const requestPath = '/api/v2/spot/trade/place-order';
@@ -396,15 +406,15 @@ export async function executeRealBitgetOrder(
       };
       if (order.price) payload.price = String(order.price);
       const bodyStr = JSON.stringify(payload);
-      const sign = await signBitgetRequest(timestamp, 'POST', requestPath, '', bodyStr, config.secretKey);
+      const sign = await signBitgetRequest(timestamp, 'POST', requestPath, '', bodyStr, activeConfig.secretKey);
 
       const directRes = await fetch(`https://api.bitget.com${requestPath}`, {
         method: 'POST',
         headers: {
-          'ACCESS-KEY': config.apiKey,
+          'ACCESS-KEY': activeConfig.apiKey,
           'ACCESS-SIGN': sign,
           'ACCESS-TIMESTAMP': timestamp,
-          'ACCESS-PASSPHRASE': config.passphrase,
+          'ACCESS-PASSPHRASE': activeConfig.passphrase,
           'Content-Type': 'application/json',
           locale: 'en-US',
         },
@@ -417,6 +427,11 @@ export async function executeRealBitgetOrder(
           success: true,
           data: directJson.data,
           message: `✓ [Bitget Spot] ส่งคำสั่งสำเร็จ: orderId=${directJson.data?.orderId || 'ok'}`,
+        };
+      } else if (directJson.code === '43012') {
+        return {
+          success: false,
+          message: `🚨 ยอดเงิน USDT ในกระเป๋า Spot ไม่เพียงพอ (Bitget Error 43012: Insufficient balance)`,
         };
       } else if (directJson.code) {
         return {
@@ -467,19 +482,29 @@ export async function fetchRealBitgetAssets(config?: BitgetConfig): Promise<{
   usdtAvailable: number;
   assets: Array<{ coin: string; available: number; frozen: number }>;
 } | null> {
+  // Ensure credentials are synced
+  let activeConfig = config;
+  if (!activeConfig?.apiKey || !activeConfig?.secretKey) {
+    const synced = await syncBitgetConfigFromCloudflare();
+    if (synced && synced.apiKey) {
+      activeConfig = { ...(config || loadBitgetConfig()), ...synced };
+      saveBitgetConfig(activeConfig as BitgetConfig);
+    }
+  }
+
   // 1. First priority: Direct Browser WebCrypto request
-  if (config?.apiKey && config?.secretKey && config?.passphrase) {
+  if (activeConfig?.apiKey && activeConfig?.secretKey && activeConfig?.passphrase) {
     try {
       const timestamp = Date.now().toString();
       const requestPath = '/api/v2/spot/account/assets';
-      const sign = await signBitgetRequest(timestamp, 'GET', requestPath, '', '', config.secretKey);
+      const sign = await signBitgetRequest(timestamp, 'GET', requestPath, '', '', activeConfig.secretKey);
 
       const directRes = await fetch(`https://api.bitget.com${requestPath}`, {
         headers: {
-          'ACCESS-KEY': config.apiKey,
+          'ACCESS-KEY': activeConfig.apiKey,
           'ACCESS-SIGN': sign,
           'ACCESS-TIMESTAMP': timestamp,
-          'ACCESS-PASSPHRASE': config.passphrase,
+          'ACCESS-PASSPHRASE': activeConfig.passphrase,
           'Content-Type': 'application/json',
           locale: 'en-US',
         },

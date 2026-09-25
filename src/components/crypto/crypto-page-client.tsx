@@ -197,6 +197,23 @@ export function CryptoPageClient() {
             // 5.3 AUTO-BUY: DCA TRANCHE or NEW TRANCHE 1 (Hybrid Quant + OpenRouter AI)
             else if (decision.action === "BUY_TRANCHE") {
               const availableCash = overallState.cashReserveUsdt
+
+              // Guard: In Live mode, verify that real USDT balance is >= 5 USDT
+              if (!config.isPaperTrading && availableCash < 5) {
+                const newLog = {
+                  id: Date.now().toString(),
+                  time: new Date().toLocaleTimeString(),
+                  action: "⚠️ [INSUFFICIENT USDT]",
+                  symbol: decision.symbol,
+                  note: `ยอด USDT ในกระเป๋า Spot มี $${availableCash.toFixed(2)} (ต้องการขั้นต่ำ $10 เพื่อเปิดไม้) กรุณาโอน USDT เข้ากระเป๋า Spot ของ Bitget`,
+                  color: "#f59e0b",
+                }
+                saveQuantLogs([newLog, ...loadQuantLogs()])
+                setActionAlert(`⚠️ ยอด USDT ใน Bitget Spot มี $${availableCash.toFixed(2)} (ไม่พอซื้อขั้นต่ำ $10) กรุณาโอน USDT เข้ากระเป๋า Spot`)
+                setTimeout(() => setActionAlert(null), 6000)
+                return
+              }
+
               const isExisting = updatedHoldings.some((h) => h.symbol === decision.symbol)
               
               let shouldExecuteBuy = true
