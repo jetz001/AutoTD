@@ -5,9 +5,11 @@ compatibility_date = "2024-12-01"
 # Serve static dashboard UI
 assets = { directory = "./public", binding = "ASSETS" }
 
-# Cron triggers: ปลุกทุก 5 นาที
+# Cron triggers:
+# 1. ลูปเทรด: ปลุกวิเคราะห์ & เทรดทุก 5 นาที
+# 2. ลูป AI Discovery: ปลุกค้นหาโมเดล OpenRouter Free 6 ตัวล่าสุดทุกวัน
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["*/5 * * * *", "0 0 * * *"]
 
 # Environment Variables
 [vars]

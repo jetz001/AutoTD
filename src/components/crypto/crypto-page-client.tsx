@@ -287,7 +287,7 @@ export function CryptoPageClient() {
             className="h-8 gap-1.5 text-xs font-semibold"
           >
             <Settings className="h-3.5 w-3.5" />
-            <span>ตั้งค่า API & กรอบความเสี่ยง</span>
+            <span>กรอบความเสี่ยง & กติกา Quant</span>
           </Button>
         </div>
       </div>

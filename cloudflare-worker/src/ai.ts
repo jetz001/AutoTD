@@ -22,6 +22,7 @@ export interface MarketContext {
   tradingMode: "SPOT" | "FUTURES" | "BOTH";
   maxLeverage: number;
   maxRiskPercent: number;
+  customModelList?: string[];
 }
 
 export async function askTradingAgent(
@@ -138,28 +139,91 @@ Respond ONLY with a valid JSON object matching this schema:
     return JSON.parse(jsonMatch ? jsonMatch[0] : text);
   }
 
-  // 5. OpenRouter Provider
+  // 5. OpenRouter Provider with 6-Tier Fallback Loop (ป้องกัน Rate limit / Model ยกเลิก)
   if (provider === "openrouter") {
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/jetz001/AutoTD",
-        "X-Title": "AutoTD Quant Bot"
-      },
-      body: JSON.stringify({
-        model: "google/gemma-4-31b-it:free",
-        messages: [{ role: "user", content: prompt }],
-        response_format: { type: "json_object" },
-        temperature: 0.2
-      })
-    });
-    const data = await res.json() as any;
-    const content = data.choices?.[0]?.message?.content;
-    const jsonMatch = content?.match(/\{[\s\S]*\}/);
-    return JSON.parse(jsonMatch ? jsonMatch[0] : content);
+    const modelsToTry = context.customModelList && context.customModelList.length > 0
+      ? context.customModelList
+      : await fetchLatest6FreeModels(apiKey);
+
+    let lastError: any = null;
+
+    for (let i = 0; i < modelsToTry.length; i++) {
+      const currentModel = modelsToTry[i];
+      try {
+        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/jetz001/AutoTD",
+            "X-Title": "AutoTD Quant Bot"
+          },
+          body: JSON.stringify({
+            model: currentModel,
+            models: modelsToTry.slice(i, i + 3), // OpenRouter automatic multi-model fallback array
+            messages: [{ role: "user", content: prompt }],
+            response_format: { type: "json_object" },
+            temperature: 0.2
+          })
+        });
+
+        if (!res.ok) {
+          console.warn(`[OpenRouter Fallback] Model ${currentModel} returned HTTP ${res.status}, trying next in 6 candidates...`);
+          lastError = new Error(`HTTP ${res.status} from ${currentModel}`);
+          continue;
+        }
+
+        const data = await res.json() as any;
+        const content = data.choices?.[0]?.message?.content;
+        if (!content) {
+          lastError = new Error(`Empty response from ${currentModel}`);
+          continue;
+        }
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : content);
+        return {
+          ...parsed,
+          reason: `[AI: ${currentModel}] ${parsed.reason || ""}`
+        };
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`[OpenRouter Fallback] Error with ${currentModel}: ${err.message}, fallback to next model...`);
+      }
+    }
+
+    throw new Error(`All 6 OpenRouter free models failed fallback: ${lastError?.message}`);
   }
 
   throw new Error(`Unsupported AI provider: ${provider}`);
 }
+
+export const DEFAULT_FREE_MODELS = [
+  "nex-agi/nex-n2.5-mini:free",
+  "nex-agi/nex-n2.5-pro:free",
+  "inclusionai/ling-3.0-flash-fin:free",
+  "qwen/qwen3.8-27b:free",
+  "liquid/lfm-2.5-2.6b:free",
+  "nvidia/nemotron-3.5-lightning:free"
+];
+
+export async function fetchLatest6FreeModels(apiKey: string): Promise<string[]> {
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/models", {
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "User-Agent": "AutoTD-QuantBot/1.0"
+      }
+    });
+    if (!res.ok) return DEFAULT_FREE_MODELS;
+    const json = await res.json() as any;
+    const free = (json.data || [])
+      .filter((m: any) => m.id && m.id.endsWith(":free"))
+      .sort((a: any, b: any) => (b.created || 0) - (a.created || 0));
+    const ids = free.slice(0, 6).map((m: any) => m.id);
+    return ids.length >= 3 ? ids : DEFAULT_FREE_MODELS;
+  } catch (err) {
+    console.warn("Failed to fetch dynamic free models:", err);
+    return DEFAULT_FREE_MODELS;
+  }
+}
+

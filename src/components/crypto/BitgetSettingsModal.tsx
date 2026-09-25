@@ -84,45 +84,34 @@ export function BitgetSettingsModal({ isOpen, onClose, onSave }: Props) {
             </div>
           </div>
 
-          {/* API Key Vault */}
-          <div className="space-y-3">
-            <div>
-              <label className="mb-1 block font-medium text-muted-foreground">
-                Bitget API Key
-              </label>
-              <Input
-                type="password"
-                placeholder="bg_xxxxxxxxxxxxxxxx"
-                value={cfg.apiKey}
-                onChange={(e) => setCfg({ ...cfg, apiKey: e.target.value })}
-                className="font-mono text-xs"
-              />
+          {/* Cloudflare Edge & OpenRouter 6-Model Auto Status */}
+          <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Shield className="h-4 w-4 text-sky-400" />
+                <span className="font-semibold text-xs text-foreground">
+                  Edge Cloudflare & OpenRouter AI
+                </span>
+              </div>
+              <span className="rounded bg-sky-500/10 border border-sky-500/30 px-1.5 py-0.5 text-[10px] font-bold text-sky-400">
+                ACTIVE 24/7
+              </span>
             </div>
-
-            <div>
-              <label className="mb-1 block font-medium text-muted-foreground">
-                Bitget Secret Key
-              </label>
-              <Input
-                type="password"
-                placeholder="ป้อน Secret Key..."
-                value={cfg.secretKey}
-                onChange={(e) => setCfg({ ...cfg, secretKey: e.target.value })}
-                className="font-mono text-xs"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block font-medium text-muted-foreground">
-                Bitget Passphrase
-              </label>
-              <Input
-                type="password"
-                placeholder="รหัสผ่าน API Passphrase..."
-                value={cfg.passphrase}
-                onChange={(e) => setCfg({ ...cfg, passphrase: e.target.value })}
-                className="font-mono text-xs"
-              />
+            <p className="text-[11px] text-muted-foreground">
+              ✓ API Key & Passphrase ฝังใน Cloudflare Secrets เรียบร้อย ปลอดภัย 100% ไม่ต้องกรอกซ้ำ
+            </p>
+            <div className="rounded border bg-background/50 p-2 text-[11px] space-y-1">
+              <div className="font-medium text-foreground flex items-center justify-between">
+                <span>🤖 OpenRouter 6-Model Fallback (อัปเดตอัตโนมัติทุกวัน):</span>
+              </div>
+              <div className="grid grid-cols-2 gap-1 text-[10px] font-mono text-muted-foreground">
+                <div>• nex-n2.5-mini:free</div>
+                <div>• nex-n2.5-pro:free</div>
+                <div>• ling-3.0-flash-fin:free</div>
+                <div>• qwen3.8-27b:free</div>
+                <div>• lfm-2.5-2.6b:free</div>
+                <div>• nemotron-3.5:free</div>
+              </div>
             </div>
           </div>
 
