@@ -90,20 +90,49 @@ export function evaluateScreener(
     const pos = range > 0 ? (t.lastPr - t.low24h) / range : 0.5;
     const estRsi = Math.round(30 + pos * 50);
 
-    // Dip in Uptrend: 24h change is positive or mild dip, RSI between 35 and 48
-    let score = 50;
-    if (t.change24h > 1 && estRsi >= 35 && estRsi <= 50) {
-      score = 88; // Ideal Dip in Bullish Trend
-    } else if (t.change24h > 5) {
-      score = 65; // Momentum running high
-    } else if (t.change24h < -6) {
-      score = 30; // Sharp dump, risky knife
-    } else if (estRsi < 35) {
-      score = 72; // Oversold bounce potential
+    // Dynamic Multi-Factor Quant Formula (0-100 pts)
+    // 1. Trend Momentum (0-35 pts) - Sweet spot is steady +1% to +6%
+    let trendScore = 15;
+    if (t.change24h >= 1 && t.change24h <= 6) {
+      trendScore = 32 + Math.min(3, Math.round((t.change24h - 1) * 0.6));
+    } else if (t.change24h > 6 && t.change24h <= 12) {
+      trendScore = 26;
+    } else if (t.change24h > 12) {
+      trendScore = 18;
+    } else if (t.change24h < 0 && t.change24h >= -3) {
+      trendScore = 22;
+    } else if (t.change24h < -3 && t.change24h >= -7) {
+      trendScore = 15;
+    } else {
+      trendScore = 8;
     }
 
+    // 2. Pullback / Mean-Reversion Zone (0-35 pts) - 35% to 55% pullback
+    let pullbackScore = 20;
+    if (pos >= 0.35 && pos <= 0.55) {
+      pullbackScore = 35;
+    } else if (pos >= 0.25 && pos < 0.35) {
+      pullbackScore = 30;
+    } else if (pos > 0.55 && pos <= 0.70) {
+      pullbackScore = 24;
+    } else if (pos < 0.25) {
+      pullbackScore = 18;
+    } else {
+      pullbackScore = 12;
+    }
+
+    // 3. Liquidity Quality Factor (0-30 pts) based on 24h volume
+    let volScore = 10;
+    if (t.usdtVolume > 50_000_000) volScore = 30;
+    else if (t.usdtVolume > 20_000_000) volScore = 26;
+    else if (t.usdtVolume > 5_000_000) volScore = 22;
+    else if (t.usdtVolume > 1_000_000) volScore = 16;
+    else volScore = 10;
+
+    const score = Math.min(99, Math.max(15, trendScore + pullbackScore + volScore));
+
     let signal: 'BUY_DIP' | 'WATCH' | 'SELL_TP' | 'COOLDOWN' = 'WATCH';
-    if (score >= 75) {
+    if (score >= 80) {
       signal = 'BUY_DIP';
     }
 
