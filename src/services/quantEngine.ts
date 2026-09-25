@@ -25,38 +25,62 @@ export interface QuantExecutiveState {
 
 const STORAGE_KEY_QUANT_LOGS = 'bitget_quant_logs_v1';
 
+// Standard 14-period RSI calculation from candle closes
+export function calculateRSI(closes: number[], period = 14): number {
+  if (!closes || closes.length <= period) return 50;
+  let gains = 0;
+  let losses = 0;
+
+  for (let i = 1; i <= period; i++) {
+    const diff = closes[i] - closes[i - 1];
+    if (diff >= 0) gains += diff;
+    else losses -= diff;
+  }
+
+  let avgGain = gains / period;
+  let avgLoss = losses / period;
+
+  for (let i = period + 1; i < closes.length; i++) {
+    const diff = closes[i] - closes[i - 1];
+    if (diff >= 0) {
+      avgGain = (avgGain * (period - 1) + diff) / period;
+      avgLoss = (avgLoss * (period - 1)) / period;
+    } else {
+      avgGain = (avgGain * (period - 1)) / period;
+      avgLoss = (avgLoss * (period - 1) - diff) / period;
+    }
+  }
+
+  if (avgLoss === 0) return 100;
+  const rs = avgGain / avgLoss;
+  return Math.round(100 - (100 / (1 + rs)));
+}
+
 export function loadQuantLogs(): Array<{ id: string; time: string; action: string; symbol: string; note: string; color: string }> {
   if (typeof window === 'undefined') return [];
   const s = localStorage.getItem(STORAGE_KEY_QUANT_LOGS);
   if (s) {
     try {
-      return JSON.parse(s);
+      const parsed = JSON.parse(s);
+      if (Array.isArray(parsed)) {
+        // Filter out legacy mock logs
+        const cleaned = parsed.filter((log: any) => 
+          !log.note?.includes('15m RSI 38.4') && 
+          !log.note?.includes('176.40') &&
+          !log.note?.includes('3.8% เหนือราคาเฉลี่ย')
+        );
+        if (cleaned.length > 0) return cleaned;
+      }
     } catch {}
   }
   return [
     {
-      id: '1',
-      time: new Date(Date.now() - 3600000).toLocaleTimeString(),
-      action: 'BUY TRANCHE [1/4]',
-      symbol: 'SOL/USDT',
-      note: 'พบจังหวะ Dip in Uptrend (15m RSI 38.4 ย่อแตะแนวรับ $178)',
+      id: 'init-1',
+      time: new Date().toLocaleTimeString(),
+      action: 'SYSTEM READY',
+      symbol: 'QUANT ENGINE',
+      note: 'ระบบพร้อมทำงาน - รอสัญญาณ Dip in Uptrend จากตลาดสด Bitget Spot',
       color: '#10b981',
-    },
-    {
-      id: '2',
-      time: new Date(Date.now() - 1800000).toLocaleTimeString(),
-      action: 'DCA TRANCHE [2/4]',
-      symbol: 'SOL/USDT',
-      note: 'ย่อตัวลงมา -2.2% เข้าไม้ถัวเฉลี่ย คำนวณต้นทุนเฉลี่ยใหม่ $176.40',
-      color: '#0ea5e9',
-    },
-    {
-      id: '3',
-      time: new Date(Date.now() - 600000).toLocaleTimeString(),
-      action: 'TAKE PROFIT',
-      symbol: 'BTC/USDT',
-      note: 'กำไรถึงเป้า +3.8% เหนือราคาเฉลี่ย ขายทำกำไรคืนเงินสด USDT',
-      color: '#a855f7',
     },
   ];
 }
@@ -70,7 +94,8 @@ export function saveQuantLogs(logs: Array<{ id: string; time: string; action: st
 // Evaluate Market Screener for Dip in Uptrend
 export function evaluateScreener(
   tickers: SpotTickerItem[],
-  holdings: SpotHolding[]
+  holdings: SpotHolding[],
+  realRsiMap?: Record<string, number>
 ): SpotTickerItem[] {
   const heldSymbols = new Set(holdings.map(h => h.symbol));
 
@@ -79,16 +104,22 @@ export function evaluateScreener(
     if (underCooldown) {
       return {
         ...t,
-        rsi15m: 32,
+        rsi15m: realRsiMap?.[t.symbol] ?? 32,
         aiScore: 10,
         signal: 'COOLDOWN',
       };
     }
 
-    // Heuristic RSI based on price change & 24h position
+    // Real RSI from 15m candles if available, else heuristic from 24h range
+    let rsi15m: number;
     const range = t.high24h - t.low24h;
     const pos = range > 0 ? (t.lastPr - t.low24h) / range : 0.5;
-    const estRsi = Math.round(30 + pos * 50);
+
+    if (realRsiMap && typeof realRsiMap[t.symbol] === 'number') {
+      rsi15m = realRsiMap[t.symbol];
+    } else {
+      rsi15m = Math.round(30 + pos * 50);
+    }
 
     // Dynamic Multi-Factor Quant Formula (0-100 pts)
     // 1. Trend Momentum (0-35 pts) - Sweet spot is steady +1% to +6%
@@ -107,18 +138,18 @@ export function evaluateScreener(
       trendScore = 8;
     }
 
-    // 2. Pullback / Mean-Reversion Zone (0-35 pts) - 35% to 55% pullback
+    // 2. Pullback Zone Factor (0-35 pts) - RSI 35 to 45 is the prime Dip-in-Uptrend zone
     let pullbackScore = 20;
-    if (pos >= 0.35 && pos <= 0.55) {
+    if (rsi15m >= 35 && rsi15m <= 46) {
       pullbackScore = 35;
-    } else if (pos >= 0.25 && pos < 0.35) {
+    } else if (rsi15m >= 30 && rsi15m < 35) {
       pullbackScore = 30;
-    } else if (pos > 0.55 && pos <= 0.70) {
-      pullbackScore = 24;
-    } else if (pos < 0.25) {
-      pullbackScore = 18;
+    } else if (rsi15m > 46 && rsi15m <= 55) {
+      pullbackScore = 25;
+    } else if (rsi15m < 30) {
+      pullbackScore = 20;
     } else {
-      pullbackScore = 12;
+      pullbackScore = 12; // Overbought > 55
     }
 
     // 3. Liquidity Quality Factor (0-30 pts) based on 24h volume
@@ -138,7 +169,7 @@ export function evaluateScreener(
 
     return {
       ...t,
-      rsi15m: estRsi,
+      rsi15m: rsi15m,
       aiScore: score,
       signal,
     };

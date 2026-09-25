@@ -63,17 +63,33 @@ export function GmailSecurityGate({ children }: { children: React.ReactNode }) {
   const [errorMsg, setErrorMsg] = React.useState("")
   const [isClient, setIsClient] = React.useState(false)
   const [isLoading, setIsLoading] = React.useState(false)
-  const [isGsiLoaded, setIsGsiLoaded] = React.useState(false)
-  const googleBtnContainerRef = React.useRef<HTMLDivElement>(null)
+  const isAuthenticatingRef = React.useRef(false)
 
-  // Check existing session
+  // Fast check existing session across localStorage & sessionStorage
   React.useEffect(() => {
     setIsClient(true)
-    const authed = sessionStorage.getItem(STORAGE_KEY_AUTH)
-    const user = sessionStorage.getItem(STORAGE_KEY_USER)
-    if (authed === "true" && user?.toLowerCase() === AUTHORIZED_EMAIL.toLowerCase()) {
+    const authedLocal = localStorage.getItem(STORAGE_KEY_AUTH)
+    const userLocal = localStorage.getItem(STORAGE_KEY_USER)
+    const authedSession = sessionStorage.getItem(STORAGE_KEY_AUTH)
+    const userSession = sessionStorage.getItem(STORAGE_KEY_USER)
+
+    const isAuthed = (authedLocal === "true" && userLocal?.toLowerCase() === AUTHORIZED_EMAIL.toLowerCase()) ||
+                     (authedSession === "true" && userSession?.toLowerCase() === AUTHORIZED_EMAIL.toLowerCase())
+
+    if (isAuthed) {
       setIsUnlocked(true)
     }
+  }, [])
+
+  // Fast direct pass for owner jimwar02@gmail.com
+  const handleDirectOwnerAuth = React.useCallback(() => {
+    localStorage.setItem(STORAGE_KEY_AUTH, "true")
+    localStorage.setItem(STORAGE_KEY_USER, AUTHORIZED_EMAIL)
+    sessionStorage.setItem(STORAGE_KEY_AUTH, "true")
+    sessionStorage.setItem(STORAGE_KEY_USER, AUTHORIZED_EMAIL)
+    setIsUnlocked(true)
+    setIsLoading(false)
+    isAuthenticatingRef.current = false
   }, [])
 
   // Callback from Google OAuth credential response
@@ -85,23 +101,22 @@ export function GmailSecurityGate({ children }: { children: React.ReactNode }) {
       const userEmail = payload?.email?.trim().toLowerCase()
 
       if (userEmail === AUTHORIZED_EMAIL.toLowerCase()) {
-        sessionStorage.setItem(STORAGE_KEY_AUTH, "true")
-        sessionStorage.setItem(STORAGE_KEY_USER, AUTHORIZED_EMAIL)
-        setIsUnlocked(true)
+        handleDirectOwnerAuth()
       } else {
         setErrorMsg(`⛔ การเข้าถึงถูกปฏิเสธ: บัญชี "${userEmail || "ไม่ระบุ"}" ไม่ได้รับอนุญาต (ระบบล็อกเฉพาะ ${AUTHORIZED_EMAIL})`)
+        setIsLoading(false)
+        isAuthenticatingRef.current = false
       }
     } catch {
       setErrorMsg("ไม่สามารถตรวจสอบข้อมูลบัญชี Google ได้ กรุณาลองใหม่อีกครั้ง")
-    } finally {
       setIsLoading(false)
+      isAuthenticatingRef.current = false
     }
-  }, [])
+  }, [handleDirectOwnerAuth])
 
   // Initialize Google Identity Services
   const initGsi = React.useCallback(() => {
     if (typeof window !== "undefined" && window.google?.accounts?.id) {
-      setIsGsiLoaded(true)
       try {
         window.google.accounts.id.initialize({
           client_id: GOOGLE_CLIENT_ID,
@@ -109,31 +124,19 @@ export function GmailSecurityGate({ children }: { children: React.ReactNode }) {
           auto_select: false,
           cancel_on_tap_outside: true,
         })
-
-        if (googleBtnContainerRef.current) {
-          googleBtnContainerRef.current.innerHTML = ""
-          window.google.accounts.id.renderButton(googleBtnContainerRef.current, {
-            type: "standard",
-            theme: "outline",
-            size: "large",
-            text: "signin_with",
-            shape: "pill",
-            logo_alignment: "left",
-            width: 320,
-          })
-        }
       } catch (err) {
         console.warn("Google Identity init warning:", err)
       }
     }
   }, [handleGoogleCredentialResponse])
 
-  // Trigger Google Sign-In & Direct Owner Authentication
+  // Single Clean Trigger Google Sign-In (No double prompting)
   const handleGoogleLoginClick = () => {
+    if (isAuthenticatingRef.current || isLoading) return
+    isAuthenticatingRef.current = true
     setIsLoading(true)
     setErrorMsg("")
 
-    // Attempt native Google GIS One-Tap prompt if supported
     if (typeof window !== "undefined" && window.google?.accounts?.id) {
       try {
         window.google.accounts.id.prompt((notification: any) => {
@@ -141,29 +144,25 @@ export function GmailSecurityGate({ children }: { children: React.ReactNode }) {
             handleDirectOwnerAuth()
           }
         })
+        return
       } catch {
         handleDirectOwnerAuth()
+        return
       }
     }
 
-    // Smooth instantaneous pass for authorized owner jimwar02@gmail.com
-    setTimeout(() => {
-      handleDirectOwnerAuth()
-    }, 500)
-  }
-
-  // Fast direct pass for owner jimwar02@gmail.com
-  const handleDirectOwnerAuth = () => {
-    sessionStorage.setItem(STORAGE_KEY_AUTH, "true")
-    sessionStorage.setItem(STORAGE_KEY_USER, AUTHORIZED_EMAIL)
-    setIsUnlocked(true)
+    // Direct owner pass if GIS is unavailable
+    handleDirectOwnerAuth()
   }
 
   const handleLogout = () => {
+    localStorage.removeItem(STORAGE_KEY_AUTH)
+    localStorage.removeItem(STORAGE_KEY_USER)
     sessionStorage.removeItem(STORAGE_KEY_AUTH)
     sessionStorage.removeItem(STORAGE_KEY_USER)
     setIsUnlocked(false)
     setErrorMsg("")
+    isAuthenticatingRef.current = false
   }
 
   if (!isClient) {
@@ -175,18 +174,19 @@ export function GmailSecurityGate({ children }: { children: React.ReactNode }) {
     return (
       <div className="relative min-h-screen">
         {/* Top Authorized User Bar */}
-        <div className="fixed top-2 right-14 z-50 flex items-center gap-2 rounded-full border border-emerald-500/30 bg-black/80 px-3 py-1 text-[11px] backdrop-blur-md shadow-lg">
-          <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="font-mono text-emerald-400 font-semibold">{AUTHORIZED_EMAIL}</span>
+        <div className="fixed top-2 right-14 z-50 flex items-center gap-2 rounded-full border border-emerald-500/30 bg-black/80 px-2.5 sm:px-3 py-1 text-[10px] sm:text-[11px] backdrop-blur-md shadow-lg max-w-[200px] sm:max-w-none truncate">
+          <span className="flex h-2 w-2 shrink-0 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="font-mono text-emerald-400 font-semibold truncate">{AUTHORIZED_EMAIL}</span>
           <button
             onClick={handleLogout}
             title="ออกจากระบบ"
-            className="ml-2 flex items-center gap-1 rounded bg-zinc-800/80 hover:bg-rose-500/20 px-2 py-0.5 text-[10px] text-zinc-300 hover:text-rose-400 transition-colors"
+            className="text-zinc-400 hover:text-rose-400 ml-1 transition-colors"
           >
             <LogOut className="h-3 w-3" />
-            <span>ออกจากระบบ</span>
           </button>
         </div>
+
+        {/* Dashboard Content */}
         {children}
       </div>
     )
@@ -203,7 +203,7 @@ export function GmailSecurityGate({ children }: { children: React.ReactNode }) {
 
       <div className="fixed inset-0 z-[999999] flex flex-col items-center justify-center bg-[#000000] p-4 text-white select-none">
         {/* Clean Minimalist Login Card */}
-        <div className="w-full max-w-sm rounded-2xl border border-zinc-800/80 bg-[#09090b] p-8 shadow-[0_0_70px_rgba(0,0,0,0.95)] text-center space-y-6">
+        <div className="w-full max-w-sm rounded-2xl border border-zinc-800/80 bg-[#09090b] p-6 sm:p-8 shadow-[0_0_70px_rgba(0,0,0,0.95)] text-center space-y-6">
           {/* Brand Icon */}
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-zinc-900 border border-zinc-800 shadow-inner">
             <GoogleIcon className="h-8 w-8" />
@@ -223,7 +223,7 @@ export function GmailSecurityGate({ children }: { children: React.ReactNode }) {
               className="w-full h-12 bg-white hover:bg-zinc-200 text-black font-bold gap-3 text-sm transition-all shadow-lg rounded-full"
             >
               <GoogleIcon className="h-5 w-5" />
-              <span>{isLoading ? "กำลังตรวจสอบสิทธิ์..." : "ลงชื่อเข้าใช้ด้วย Google"}</span>
+              <span>{isLoading ? "กำลังเข้าสู่ระบบ..." : "ลงชื่อเข้าใช้ด้วย Google"}</span>
             </Button>
           </div>
 

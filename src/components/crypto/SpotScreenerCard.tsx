@@ -30,22 +30,22 @@ export function SpotScreenerCard({
   )
 
   return (
-    <Card className="col-span-12 lg:col-span-6 flex flex-col h-full">
-      <CardHeader className="flex flex-row items-center justify-between pb-3">
-        <div>
-          <CardTitle className="text-base font-bold flex items-center gap-2">
+    <Card className="col-span-12 lg:col-span-6 flex flex-col h-full overflow-hidden">
+      <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3">
+        <div className="min-w-0">
+          <CardTitle className="text-sm sm:text-base font-bold flex flex-wrap items-center gap-1.5 sm:gap-2">
             <span>🔍 Bitget Spot AI Screener</span>
-            <span className="rounded-md bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+            <span className="rounded-md bg-muted px-2 py-0.5 text-[9px] sm:text-[10px] font-semibold text-muted-foreground">
               Top 20 วอลลุ่ม
             </span>
           </CardTitle>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-[11px] sm:text-xs text-muted-foreground mt-0.5">
             สแกนหาจังหวะย่อในขาขึ้น (Dip in Uptrend) จัดลำดับคะแนนน่าซื้อ
           </p>
         </div>
 
         {/* Quick Search */}
-        <div className="relative w-36">
+        <div className="relative w-full sm:w-36">
           <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
           <input
             type="text"
@@ -57,9 +57,9 @@ export function SpotScreenerCard({
         </div>
       </CardHeader>
 
-      <CardContent className="flex-1 overflow-auto p-0">
-        <div className="max-h-[380px] overflow-y-auto">
-          <table className="w-full border-collapse text-left text-xs">
+      <CardContent className="flex-1 p-0 overflow-hidden">
+        <div className="max-h-[380px] overflow-x-auto overflow-y-auto w-full">
+          <table className="w-full min-w-[500px] border-collapse text-left text-xs">
             <thead className="sticky top-0 bg-card border-b z-10 text-muted-foreground text-[11px]">
               <tr>
                 <th className="py-2.5 pl-4 pr-2 font-medium">เหรียญ / 24h Vol</th>

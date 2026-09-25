@@ -23,25 +23,25 @@ export function SpotHoldingsAvgCostCard({
   const totalInvested = holdings.reduce((sum, h) => sum + h.totalInvestedUsdt, 0)
 
   return (
-    <Card className="col-span-12 lg:col-span-6 flex flex-col h-full">
-      <CardHeader className="flex flex-row items-center justify-between pb-3">
-        <div>
-          <CardTitle className="text-base font-bold flex items-center gap-2">
+    <Card className="col-span-12 lg:col-span-6 flex flex-col h-full overflow-hidden">
+      <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3">
+        <div className="min-w-0">
+          <CardTitle className="text-sm sm:text-base font-bold flex flex-wrap items-center gap-1.5 sm:gap-2">
             <span>💼 เหรียญที่ถือ & ต้นทุนเฉลี่ย (DCA Avg Cost)</span>
-            <span className="rounded-md bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+            <span className="rounded-md bg-primary/10 px-2 py-0.5 text-[9px] sm:text-[10px] font-bold text-primary">
               {holdings.length}/{config.maxCoins} เหรียญ
             </span>
           </CardTitle>
-          <p className="text-xs text-muted-foreground">
-            แก้ปัญหางงหลายไม้: รวมคำนวณราคาเฉลี่ยจริง + เป้าขาย TP / จุดคัท SL
+          <p className="text-[11px] sm:text-xs text-muted-foreground mt-0.5">
+            รวมคำนวณราคาเฉลี่ยจริง + เป้าขาย TP / จุดคัท SL
           </p>
         </div>
 
         {/* Portfolio Summary Badge */}
-        <div className="text-right">
+        <div className="text-left sm:text-right">
           <div className="text-[10px] text-muted-foreground">Unrealized PnL รวม</div>
           <div
-            className={`font-mono text-sm font-bold ${
+            className={`font-mono text-xs sm:text-sm font-bold ${
               totalUnrealizedPnl >= 0 ? "text-emerald-500" : "text-rose-500"
             }`}
           >
@@ -50,7 +50,7 @@ export function SpotHoldingsAvgCostCard({
         </div>
       </CardHeader>
 
-      <CardContent className="flex-1 overflow-auto p-0">
+      <CardContent className="flex-1 p-0 overflow-hidden">
         {holdings.length === 0 ? (
           <div className="flex h-48 flex-col items-center justify-center text-center p-4 text-muted-foreground">
             <Layers className="h-8 w-8 mb-2 opacity-30" />
@@ -58,8 +58,8 @@ export function SpotHoldingsAvgCostCard({
             <p className="text-[11px] mt-0.5">Quant กำลังสแกนหาจังหวะ Dip หรือกด "ซื้อไม้นี้" จากตาราง Screener ได้เลย</p>
           </div>
         ) : (
-          <div className="max-h-[380px] overflow-y-auto">
-            <table className="w-full border-collapse text-left text-xs">
+          <div className="max-h-[380px] overflow-x-auto overflow-y-auto w-full">
+            <table className="w-full min-w-[500px] border-collapse text-left text-xs">
               <thead className="sticky top-0 bg-card border-b z-10 text-muted-foreground text-[11px]">
                 <tr>
                   <th className="py-2.5 pl-4 pr-2 font-medium">เหรียญ / ไม้</th>

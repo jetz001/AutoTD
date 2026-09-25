@@ -1,11 +1,11 @@
 "use client"
 
 import * as React from "react"
-import { Shield, Key, Lock, CheckCircle2, Sliders, X } from "lucide-react"
+import { Shield, Key, Lock, CheckCircle2, Sliders, X, Eye, EyeOff, AlertTriangle, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { BitgetConfig } from "@/services/bitgetSpot"
-import { loadBitgetConfig, saveBitgetConfig } from "@/services/bitgetSpot"
+import { loadBitgetConfig, saveBitgetConfig, EDGE_BOT_URL } from "@/services/bitgetSpot"
 
 interface Props {
   isOpen: boolean
@@ -16,15 +16,51 @@ interface Props {
 export function BitgetSettingsModal({ isOpen, onClose, onSave }: Props) {
   const [cfg, setCfg] = React.useState<BitgetConfig>(loadBitgetConfig)
   const [savedSuccess, setSavedSuccess] = React.useState(false)
+  const [showSecret, setShowSecret] = React.useState(false)
+  const [isTesting, setIsTesting] = React.useState(false)
+  const [testResult, setTestResult] = React.useState<{ success: boolean; message: string } | null>(null)
 
   React.useEffect(() => {
     if (isOpen) {
       setCfg(loadBitgetConfig())
       setSavedSuccess(false)
+      setTestResult(null)
     }
   }, [isOpen])
 
   if (!isOpen) return null
+
+  const handleTestConnection = async () => {
+    setIsTesting(true)
+    setTestResult(null)
+    try {
+      const headers: Record<string, string> = {}
+      if (cfg.apiKey) headers["x-bitget-key"] = cfg.apiKey
+      if (cfg.secretKey) headers["x-bitget-secret"] = cfg.secretKey
+      if (cfg.passphrase) headers["x-bitget-passphrase"] = cfg.passphrase
+
+      const res = await fetch("/api/bitget?action=check", { headers })
+      const json = await res.json()
+      if (res.ok && json.code === "00000") {
+        setTestResult({
+          success: true,
+          message: "✓ เชื่อมต่อสำเร็จ! สิทธิ์ API Key ใช้งานได้ปกติ (Bitget Spot)",
+        })
+      } else {
+        setTestResult({
+          success: false,
+          message: `เชื่อมต่อไม่สำเร็จ: ${json.msg || "กรุณาตรวจสอบ API Key / Secret / Passphrase"}`,
+        })
+      }
+    } catch (e: any) {
+      setTestResult({
+        success: false,
+        message: `ข้อผิดพลาดการเชื่อมต่อ: ${e.message}`,
+      })
+    } finally {
+      setIsTesting(false)
+    }
+  }
 
   const handleSave = () => {
     saveBitgetConfig(cfg)
@@ -38,7 +74,7 @@ export function BitgetSettingsModal({ isOpen, onClose, onSave }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-2xl text-card-foreground">
+      <div className="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-2xl text-card-foreground max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between border-b pb-3">
           <div className="flex items-center gap-2">
@@ -84,35 +120,101 @@ export function BitgetSettingsModal({ isOpen, onClose, onSave }: Props) {
             </div>
           </div>
 
-          {/* Cloudflare Edge & OpenRouter 6-Model Auto Status */}
-          <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 p-3 space-y-2">
+          {/* Bitget API Credentials */}
+          <div className="rounded-lg border border-primary/20 bg-muted/10 p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 font-semibold text-foreground text-xs">
+                <Lock className="h-3.5 w-3.5 text-primary" />
+                <span>Bitget V2 API Credentials</span>
+              </div>
+              <span className="text-[10px] text-muted-foreground">เฉพาะสิทธิ์ Read + Spot Trade</span>
+            </div>
+
+            <div className="space-y-2">
+              <div>
+                <label className="text-[11px] text-muted-foreground">API Key</label>
+                <Input
+                  type="text"
+                  placeholder="bg_..."
+                  value={cfg.apiKey}
+                  onChange={(e) => setCfg({ ...cfg, apiKey: e.target.value.trim() })}
+                  className="mt-1 h-8 text-xs font-mono"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] text-muted-foreground">Secret Key</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowSecret(!showSecret)}
+                    className="text-[10px] text-primary flex items-center gap-1 hover:underline"
+                  >
+                    {showSecret ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                    {showSecret ? "ซ่อน" : "แสดง"}
+                  </button>
+                </div>
+                <Input
+                  type={showSecret ? "text" : "password"}
+                  placeholder="Secret Key"
+                  value={cfg.secretKey}
+                  onChange={(e) => setCfg({ ...cfg, secretKey: e.target.value.trim() })}
+                  className="mt-1 h-8 text-xs font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] text-muted-foreground">Passphrase</label>
+                <Input
+                  type={showSecret ? "text" : "password"}
+                  placeholder="Passphrase"
+                  value={cfg.passphrase}
+                  onChange={(e) => setCfg({ ...cfg, passphrase: e.target.value.trim() })}
+                  className="mt-1 h-8 text-xs font-mono"
+                />
+              </div>
+
+              <div className="pt-1 flex items-center justify-between">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTestConnection}
+                  disabled={isTesting || (!cfg.apiKey && !process.env.NEXT_PUBLIC_BITGET_API_KEY)}
+                  className="h-7 text-[11px] gap-1"
+                >
+                  {isTesting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Key className="h-3 w-3" />}
+                  <span>ทดสอบเชื่อมต่อ API</span>
+                </Button>
+                {testResult && (
+                  <span
+                    className={`text-[11px] font-medium ${
+                      testResult.success ? "text-emerald-500" : "text-rose-500"
+                    }`}
+                  >
+                    {testResult.message}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Cloudflare Pages Deployment Info */}
+          <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Shield className="h-4 w-4 text-sky-400" />
+                <Shield className="h-4 w-4 text-emerald-400" />
                 <span className="font-semibold text-xs text-foreground">
-                  Edge Cloudflare & OpenRouter AI
+                  Cloudflare Pages Edge Network
                 </span>
               </div>
-              <span className="rounded bg-sky-500/10 border border-sky-500/30 px-1.5 py-0.5 text-[10px] font-bold text-sky-400">
-                ACTIVE 24/7
+              <span className="rounded bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 text-[10px] font-bold text-emerald-400">
+                autotd.pages.dev
               </span>
             </div>
             <p className="text-[11px] text-muted-foreground">
-              ✓ API Key & Passphrase ฝังใน Cloudflare Secrets เรียบร้อย ปลอดภัย 100% ไม่ต้องกรอกซ้ำ
+              ✓ ข้อมูล API Key จะถูกจัดเก็บอย่างปลอดภัยในเบราว์เซอร์ของคุณ และเชื่อมต่อไปยัง Bitget API ด้วยการเข้ารหัส HMAC-SHA256
             </p>
-            <div className="rounded border bg-background/50 p-2 text-[11px] space-y-1">
-              <div className="font-medium text-foreground flex items-center justify-between">
-                <span>🤖 OpenRouter 6-Model Fallback (อัปเดตอัตโนมัติทุกวัน):</span>
-              </div>
-              <div className="grid grid-cols-2 gap-1 text-[10px] font-mono text-muted-foreground">
-                <div>• nex-n2.5-mini:free</div>
-                <div>• nex-n2.5-pro:free</div>
-                <div>• ling-3.0-flash-fin:free</div>
-                <div>• qwen3.8-27b:free</div>
-                <div>• lfm-2.5-2.6b:free</div>
-                <div>• nemotron-3.5:free</div>
-              </div>
-            </div>
           </div>
 
           {/* Quant Rules & Guardrails */}

@@ -20,6 +20,11 @@ import {
   getPaperBalance,
   findWeakestHolding,
   executeRebalanceRotation,
+  fetchBatchRealRsi,
+  fetchRealBitgetAssets,
+  fetchEdgeBotStatus,
+  triggerEdgeBotWake,
+  EDGE_BOT_URL,
   type BitgetConfig,
   type SpotHolding,
   type SpotTickerItem,
@@ -31,6 +36,8 @@ import {
   loadQuantLogs,
   type QuantExecutiveState,
 } from "@/services/quantEngine"
+
+export type CryptoPrices = Record<string, number>
 
 export function CryptoPageClient() {
   const [config, setConfig] = React.useState<BitgetConfig>(loadBitgetConfig)
@@ -71,18 +78,22 @@ export function CryptoPageClient() {
     return map
   }, [tickers])
 
-  // Fetch Tickers & Run Quant Engine
+  // Fetch Tickers & Run Quant Engine (Real Market Data + Real RSI + Real Portfolio Check)
   const runScanCycle = React.useCallback(async () => {
     setIsScanning(true)
     try {
       const topTickers = await fetchTopBitgetSpotTickers()
       if (topTickers.length > 0) {
-        // 1. Evaluate Screener Scores
+        // 1. Calculate Real 15m RSI for Top 20 coins
+        const symbols = topTickers.map((t) => t.symbol)
+        const realRsiMap = await fetchBatchRealRsi(symbols)
+
+        // 2. Evaluate Screener with Real Technical Indicators
         const currentHoldings = loadSpotHoldings()
-        const evaluated = evaluateScreener(topTickers, currentHoldings)
+        const evaluated = evaluateScreener(topTickers, currentHoldings, realRsiMap)
         setTickers(evaluated)
 
-        // 2. Update Holdings with Live Prices
+        // 3. Update Holdings with Live Prices
         const pMap: Record<string, number> = {}
         for (const t of topTickers) {
           pMap[t.symbol] = t.lastPr
@@ -91,14 +102,40 @@ export function CryptoPageClient() {
         setHoldings(updatedHoldings)
         saveSpotHoldings(updatedHoldings)
 
-        // 3. Master Quant Check (Take Profit & Cut Loss rules)
+        // 4. Master Quant Check (Take Profit & Cut Loss rules)
         const { decision, overallState } = runQuantPortfolioCheck(updatedHoldings, config)
+
+        // If in Real Live Mode, sync actual USDT balance from Bitget
+        if (!config.isPaperTrading) {
+          const realAcc = await fetchRealBitgetAssets(config)
+          if (realAcc) {
+            overallState.cashReserveUsdt = realAcc.usdtAvailable
+          }
+        }
+
+        // Sync real logs from Cloudflare Edge Bot if available
+        try {
+          const edgeStatus = await fetchEdgeBotStatus()
+          if (edgeStatus?.logs && Array.isArray(edgeStatus.logs) && edgeStatus.logs.length > 0) {
+            const edgeLogs = edgeStatus.logs.map((el: any) => ({
+              id: el.id || String(el.timestamp || Date.now()),
+              time: el.timestamp ? new Date(el.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString(),
+              action: el.action || "AI SCAN",
+              symbol: el.symbol || "EDGE BOT",
+              note: el.reason || el.note || el.message || "วิเคราะห์ตลาดอัตโนมัติ",
+              color: el.action?.includes("BUY") ? "#10b981" : el.action?.includes("CUT") ? "#ef4444" : "#38bdf8",
+            }))
+            const localLogs = loadQuantLogs()
+            overallState.recentLogs = [...edgeLogs, ...localLogs].slice(0, 15)
+          }
+        } catch {}
+
         setQuantState(overallState)
 
-        // 4. Auto-execute if decision triggered
+        // 5. Auto-execute if decision triggered
         if (decision) {
           if (decision.action === "CUT_LOSS") {
-            const res = executeSpotSell(decision.symbol, decision.price, true)
+            const res = await executeSpotSell(decision.symbol, decision.price, true, config)
             setHoldings(res.updatedHoldings)
             setActionAlert(res.message)
             const newLog = {
@@ -112,7 +149,7 @@ export function CryptoPageClient() {
             const logs = [newLog, ...loadQuantLogs()]
             saveQuantLogs(logs)
           } else if (decision.action === "TAKE_PROFIT") {
-            const res = executeSpotSell(decision.symbol, decision.price, false)
+            const res = await executeSpotSell(decision.symbol, decision.price, false, config)
             setHoldings(res.updatedHoldings)
             setActionAlert(res.message)
             const newLog = {
@@ -142,10 +179,10 @@ export function CryptoPageClient() {
     return () => clearInterval(interval)
   }, [runScanCycle])
 
-  // Buy Tranche Handler
-  const handleBuyTranche = (symbol: string, price: number) => {
+  // Buy Tranche Handler (Real or Paper)
+  const handleBuyTranche = async (symbol: string, price: number) => {
     const trancheBudget = 500 // $500 per tranche
-    const res = executeSpotBuyTranche(symbol, price, trancheBudget, config)
+    const res = await executeSpotBuyTranche(symbol, price, trancheBudget, config)
     setHoldings(res.updatedHoldings)
     setActionAlert(res.message)
     setTimeout(() => setActionAlert(null), 4000)
@@ -153,7 +190,7 @@ export function CryptoPageClient() {
     const newLog = {
       id: Date.now().toString(),
       time: new Date().toLocaleTimeString(),
-      action: "BUY TRANCHE",
+      action: config.isPaperTrading ? "BUY TRANCHE [PAPER]" : "BUY TRANCHE [LIVE]",
       symbol,
       note: res.message,
       color: "#0ea5e9",
@@ -164,11 +201,11 @@ export function CryptoPageClient() {
   }
 
   // Sell Holding Handler (Manual TP or Cut Loss)
-  const handleSellHolding = (symbol: string, currentPrice: number, isCutLoss: boolean) => {
+  const handleSellHolding = async (symbol: string, currentPrice: number, isCutLoss: boolean) => {
     const actionLabel = isCutLoss ? "คัทลอส" : "ขายทำกำไร"
     if (!confirm(`ยืนยันการ${actionLabel} ${symbol} ทันที 100% ด้วยราคาตลาด?`)) return
 
-    const res = executeSpotSell(symbol, currentPrice, isCutLoss)
+    const res = await executeSpotSell(symbol, currentPrice, isCutLoss, config)
     setHoldings(res.updatedHoldings)
     setActionAlert(res.message)
     setTimeout(() => setActionAlert(null), 4000)
@@ -187,7 +224,7 @@ export function CryptoPageClient() {
   }
 
   // Rebalance Swap Handler (Sell weakest stagnant holding, buy Grade A+ opportunity)
-  const handleRebalanceSwap = (newSymbol: string, price: number) => {
+  const handleRebalanceSwap = async (newSymbol: string, price: number) => {
     const weakest = findWeakestHolding(holdings)
     if (!weakest) {
       alert("ไม่พบเหรียญที่สามารถสลับออกได้")
@@ -202,7 +239,7 @@ export function CryptoPageClient() {
       return
     }
 
-    const res = executeRebalanceRotation(weakest.symbol, newSymbol, price, config)
+    const res = await executeRebalanceRotation(weakest.symbol, newSymbol, price, config)
     setHoldings(res.updatedHoldings)
     setActionAlert(res.message)
     setTimeout(() => setActionAlert(null), 5000)
@@ -221,7 +258,7 @@ export function CryptoPageClient() {
   }
 
   // Action 1: Take Profit All
-  const handleTakeProfitAll = () => {
+  const handleTakeProfitAll = async () => {
     if (holdings.length === 0) {
       alert("ไม่มีเหรียญในพอร์ตที่สามารถขายทำกำไรได้")
       return
@@ -231,7 +268,7 @@ export function CryptoPageClient() {
     let totalRealized = 0
     let currentH = [...holdings]
     for (const h of holdings) {
-      const res = executeSpotSell(h.symbol, h.currentPrice, false)
+      const res = await executeSpotSell(h.symbol, h.currentPrice, false, config)
       totalRealized += res.realizedPnl
       currentH = res.updatedHoldings
     }
@@ -242,7 +279,7 @@ export function CryptoPageClient() {
   }
 
   // Action 2: Emergency Panic Cut Loss & Cooldown
-  const handleEmergencyPanicCutLoss = () => {
+  const handleEmergencyPanicCutLoss = async () => {
     if (holdings.length === 0) {
       alert("ไม่มีเหรียญในพอร์ตที่ต้องคัทลอส")
       return
@@ -251,7 +288,7 @@ export function CryptoPageClient() {
 
     let currentH = [...holdings]
     for (const h of holdings) {
-      const res = executeSpotSell(h.symbol, h.currentPrice, true)
+      const res = await executeSpotSell(h.symbol, h.currentPrice, true, config)
       currentH = res.updatedHoldings
     }
     setHoldings(currentH)
@@ -260,70 +297,74 @@ export function CryptoPageClient() {
     runScanCycle()
   }
 
-  // Action 3: Recalculate & Sync Avg Cost
-  const handleRecalculateAvgCost = () => {
-    runScanCycle()
-    setActionAlert(`💼 ซิงก์ราคาตลาดสด & อัปเดตคำนวณต้นทุนเฉลี่ยถ่วงน้ำหนักทุกไม้เรียบร้อย`)
+  // Action 3: Recalculate & Sync Avg Cost & Trigger Edge Bot Scan
+  const handleManualScan = async () => {
+    triggerEdgeBotWake("MANUAL_SCAN_TRIGGER_FROM_UI").catch(() => {})
+    await runScanCycle()
+    setActionAlert(`💼 สแกนตลาดสด & คำนวณ RSI 15m และต้นทุนเฉลี่ยถ่วงน้ำหนักเรียบร้อย`)
     setTimeout(() => setActionAlert(null), 3000)
   }
 
   const selectedHolding = holdings.find((h) => h.symbol === selectedSymbol)
   const selectedPrice = priceMap[selectedSymbol] ?? (selectedHolding?.currentPrice || 0)
-  const totalBalance = getPaperBalance() + holdings.reduce((sum, h) => sum + (h.totalAmount * h.currentPrice), 0)
+  const totalBalance =
+    (config.isPaperTrading ? getPaperBalance() : quantState.cashReserveUsdt) +
+    holdings.reduce((sum, h) => sum + h.totalAmount * h.currentPrice, 0)
 
   return (
-    <div className="flex flex-col gap-4 px-4 pb-8">
+    <div className="flex flex-col gap-3 sm:gap-4 px-2 sm:px-4 pb-8 w-full max-w-full overflow-x-hidden">
       {/* Top Bar: Title & Global Status */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card/60 px-4 py-2.5 backdrop-blur-md">
-        <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-black text-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-xl border bg-card/60 p-2.5 sm:px-4 sm:py-2.5 backdrop-blur-md">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground font-black text-xs">
             BG
           </div>
-          <div>
-            <h1 className="text-sm font-bold tracking-tight text-foreground flex items-center gap-2">
+          <div className="min-w-0">
+            <h1 className="text-xs sm:text-sm font-bold tracking-tight text-foreground flex flex-wrap items-center gap-1.5">
               <span>Bitget Spot Quant Terminal</span>
-              <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">
-                SPOT EXCLUSIVE
+              <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[9px] sm:text-[10px] font-bold text-primary">
+                SPOT
               </span>
             </h1>
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-[10px] sm:text-[11px] text-muted-foreground truncate">
               ระบบสกรีนเหรียญน่าซื้อ + คำนวณต้นทุนเฉลี่ยหลายไม้ (DCA) + คัทเป็นไม่ติดดอย
             </p>
           </div>
         </div>
 
         {/* Global Metrics & Actions */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 w-full sm:w-auto justify-between sm:justify-end">
           {/* Equity Badge */}
-          <div className="rounded-lg border bg-muted/40 px-3 py-1 text-right">
-            <div className="text-[9px] uppercase tracking-wider text-muted-foreground">พอร์ต Spot รวม</div>
+          <div className="rounded-lg border bg-muted/40 px-2 sm:px-3 py-1 text-right">
+            <div className="text-[8px] sm:text-[9px] uppercase tracking-wider text-muted-foreground">
+              {config.isPaperTrading ? "พอร์ต Paper" : "พอร์ตจริง Spot"}
+            </div>
             <div className="font-mono text-xs font-bold text-emerald-500">
               ${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
           </div>
 
-          {/* Cloudflare 24/7 Edge Status Pill */}
-          <a
-            href="https://bitget-ai-trader.jimwar02.workers.dev/api/status"
-            target="_blank"
-            rel="noreferrer"
-            className="hidden sm:flex items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 text-xs font-bold text-sky-400 hover:bg-sky-500/20 transition-colors"
-            title="Cloudflare Worker รันบนเซิร์ฟเวอร์ Edge 24/7 พร้อม OpenRouter AI วิเคราะห์ทุก 5 นาที"
+          {/* AutoTD Quant Status Pill */}
+          <div
+            className="flex items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[11px] font-bold text-emerald-400"
+            title="AutoTD AI Quant Engine พร้อมทำงานบน Cloudflare Pages"
           >
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-sky-500"></span>
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
             </span>
-            <span>⚡ EDGE BOT: 24/7 AUTO (5m)</span>
-          </a>
+            <span>⚡ QUANT</span>
+          </div>
 
           {/* Mode Pill */}
-          <span className={`rounded-lg px-2.5 py-1 text-xs font-bold border ${
-            config.isPaperTrading
-              ? "bg-amber-500/10 border-amber-500/30 text-amber-500"
-              : "bg-emerald-500/10 border-emerald-500/30 text-emerald-500"
-          }`}>
-            {config.isPaperTrading ? "🛡️ PAPER TRADING" : "🔥 REAL LIVE"}
+          <span
+            className={`rounded-lg px-2 py-1 text-[11px] font-bold border ${
+              config.isPaperTrading
+                ? "bg-amber-500/10 border-amber-500/30 text-amber-500"
+                : "bg-emerald-500/10 border-emerald-500/30 text-emerald-500"
+            }`}
+          >
+            {config.isPaperTrading ? "🛡️ PAPER" : "🔥 LIVE"}
           </span>
 
           {/* Settings Trigger */}
@@ -331,53 +372,55 @@ export function CryptoPageClient() {
             variant="outline"
             size="sm"
             onClick={() => setIsSettingsOpen(true)}
-            className="h-8 gap-1.5 text-xs font-semibold"
+            className="h-7 sm:h-8 gap-1 text-[11px] sm:text-xs font-semibold px-2.5"
           >
-            <Settings className="h-3.5 w-3.5" />
-            <span>กรอบความเสี่ยง & กติกา Quant</span>
+            <Settings className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+            <span>ตั้งค่า API</span>
           </Button>
         </div>
       </div>
 
       {/* Floating Action Alert Toast */}
       {actionAlert && (
-        <div className="rounded-lg border border-primary/40 bg-primary/10 px-4 py-2 text-xs font-semibold text-primary shadow-lg flex items-center justify-between animate-in fade-in slide-in-from-top-2">
-          <span>{actionAlert}</span>
-          <button onClick={() => setActionAlert(null)} className="text-muted-foreground hover:text-foreground">✕</button>
+        <div className="rounded-lg border border-primary/40 bg-primary/10 px-3 py-2 text-xs font-semibold text-primary shadow-lg flex items-center justify-between animate-in fade-in slide-in-from-top-2">
+          <span className="truncate mr-2">{actionAlert}</span>
+          <button onClick={() => setActionAlert(null)} className="text-muted-foreground hover:text-foreground shrink-0">
+            ✕
+          </button>
         </div>
       )}
 
-      {/* 🚀 QUICK ACTION COMMAND BAR (ปุ่มสั่งการทำงานของ Quant) */}
-      <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-border/80 bg-card/70 p-2.5 backdrop-blur-md shadow-sm">
-        <div className="flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400 font-bold text-xs">
+      {/* 🚀 QUICK ACTION COMMAND BAR */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl border border-border/80 bg-card/70 p-2 sm:p-2.5 backdrop-blur-md shadow-sm">
+        <div className="flex items-center gap-1.5">
+          <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400 font-bold text-xs">
             ⚡
           </div>
-          <span className="text-xs font-bold text-foreground">ปุ่มสั่งการ QUANT AI:</span>
+          <span className="text-[11px] sm:text-xs font-bold text-foreground">ปุ่มสั่งการ QUANT AI:</span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5 sm:gap-2 w-full sm:w-auto">
           {/* Action 1: Spot AI Screener */}
           <Button
             size="sm"
             variant="outline"
-            onClick={runScanCycle}
+            onClick={handleManualScan}
             disabled={isScanning}
-            className="h-8 gap-1.5 text-xs font-bold text-sky-400 border-sky-500/30 hover:bg-sky-500/10"
+            className="h-7 sm:h-8 gap-1 text-[11px] sm:text-xs font-bold text-sky-400 border-sky-500/30 hover:bg-sky-500/10 justify-center"
           >
-            <Search className={`h-3.5 w-3.5 ${isScanning ? "animate-spin" : ""}`} />
-            <span>สแกนตลาด (Spot Screener)</span>
+            <Search className={`h-3 w-3 sm:h-3.5 sm:w-3.5 ${isScanning ? "animate-spin" : ""}`} />
+            <span>สแกนตลาด</span>
           </Button>
 
           {/* Action 2: ต้นทุนเฉลี่ย (Avg Cost) */}
           <Button
             size="sm"
             variant="outline"
-            onClick={handleRecalculateAvgCost}
-            className="h-8 gap-1.5 text-xs font-bold text-purple-400 border-purple-500/30 hover:bg-purple-500/10"
+            onClick={handleManualScan}
+            className="h-7 sm:h-8 gap-1 text-[11px] sm:text-xs font-bold text-purple-400 border-purple-500/30 hover:bg-purple-500/10 justify-center"
           >
-            <Layers className="h-3.5 w-3.5" />
-            <span>คำนวณต้นทุนเฉลี่ย (DCA Avg)</span>
+            <Layers className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+            <span>คำนวณต้นทุนเฉลี่ย</span>
           </Button>
 
           {/* Action 3: Take Profit Engine */}
@@ -386,10 +429,10 @@ export function CryptoPageClient() {
             variant="outline"
             onClick={handleTakeProfitAll}
             disabled={holdings.length === 0}
-            className="h-8 gap-1.5 text-xs font-bold text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
+            className="h-7 sm:h-8 gap-1 text-[11px] sm:text-xs font-bold text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 justify-center"
           >
-            <Zap className="h-3.5 w-3.5" />
-            <span>ล็อคกำไรทั้งหมด (Take Profit)</span>
+            <Zap className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+            <span>ล็อคกำไร (TP)</span>
           </Button>
 
           {/* Action 4: Cut-Loss & Cooldown */}
@@ -398,10 +441,10 @@ export function CryptoPageClient() {
             variant="outline"
             onClick={handleEmergencyPanicCutLoss}
             disabled={holdings.length === 0}
-            className="h-8 gap-1.5 text-xs font-bold text-rose-400 border-rose-500/40 hover:bg-rose-500/10"
+            className="h-7 sm:h-8 gap-1 text-[11px] sm:text-xs font-bold text-rose-400 border-rose-500/40 hover:bg-rose-500/10 justify-center"
           >
-            <ShieldAlert className="h-3.5 w-3.5" />
-            <span>คัทลอสฉุกเฉิน (Cut-Loss & Cooldown)</span>
+            <ShieldAlert className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+            <span>คัทลอสฉุกเฉิน</span>
           </Button>
         </div>
       </div>
@@ -410,8 +453,6 @@ export function CryptoPageClient() {
       <QuantExecutiveBriefing
         state={quantState}
         config={config}
-        onTriggerScan={runScanCycle}
-        isScanning={isScanning}
       />
 
       {/* 2. Middle Grid: Spot Screener (Left) & Holdings & Avg Cost (Right) */}

@@ -1,5 +1,8 @@
 // Bitget V2 Spot Quantitative Engine & Paper Trading Service
 // Built with native Web Crypto API (crypto.subtle) for 100% Edge & Browser compatibility
+import { calculateRSI } from './quantEngine';
+
+export const EDGE_BOT_URL = '';
 
 export interface BitgetConfig {
   apiKey: string;
@@ -202,6 +205,149 @@ export async function fetchBitgetSpotCandles(
   }
 }
 
+// Real 15m RSI Calculation & Cache
+const rsiCache: Record<string, { rsi: number; timestamp: number }> = {};
+
+export async function fetchRealRsi15m(symbol: string): Promise<number> {
+  const cached = rsiCache[symbol];
+  if (cached && Date.now() - cached.timestamp < 60000) {
+    return cached.rsi;
+  }
+  try {
+    const candles = await fetchBitgetSpotCandles(symbol, '15min', 30);
+    if (candles && candles.length >= 15) {
+      const closes = candles.map(c => c.close);
+      const rsi = calculateRSI(closes, 14);
+      rsiCache[symbol] = { rsi, timestamp: Date.now() };
+      return rsi;
+    }
+  } catch (e) {
+    console.warn(`Failed to fetch 15m candles for RSI of ${symbol}:`, e);
+  }
+  return 50;
+}
+
+export async function fetchBatchRealRsi(symbols: string[]): Promise<Record<string, number>> {
+  const map: Record<string, number> = {};
+  // Batch in chunks of 5 to avoid browser network congestion
+  const chunkSize = 5;
+  for (let i = 0; i < symbols.length; i += chunkSize) {
+    const chunk = symbols.slice(i, i + chunkSize);
+    await Promise.allSettled(
+      chunk.map(async (sym) => {
+        const val = await fetchRealRsi15m(sym);
+        map[sym] = val;
+      })
+    );
+  }
+  return map;
+}
+
+// Edge Bot Integration
+export async function fetchEdgeBotStatus() {
+  if (!EDGE_BOT_URL) return null;
+  try {
+    const res = await fetch(`${EDGE_BOT_URL}/api/status`, { cache: 'no-store' });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function triggerEdgeBotWake(reason = 'MANUAL_TRIGGER_FROM_DASHBOARD') {
+  if (!EDGE_BOT_URL) return { success: true };
+  try {
+    const res = await fetch(`${EDGE_BOT_URL}/api/wake`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    });
+    return await res.json();
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
+}
+
+// Real Bitget API Communication
+export async function executeRealBitgetOrder(
+  order: {
+    symbol: string;
+    side: 'buy' | 'sell';
+    orderType: 'market' | 'limit';
+    size: string;
+    price?: string;
+  },
+  config?: BitgetConfig
+): Promise<{ success: boolean; data?: any; message: string }> {
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (config?.apiKey) headers['x-bitget-key'] = config.apiKey;
+    if (config?.secretKey) headers['x-bitget-secret'] = config.secretKey;
+    if (config?.passphrase) headers['x-bitget-passphrase'] = config.passphrase;
+
+    const res = await fetch('/api/bitget', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(order),
+    });
+    const json = await res.json();
+    if (!res.ok || json.code !== '00000') {
+      return {
+        success: false,
+        message: `Bitget API Error (${json.code || res.status}): ${json.msg || 'Order failed'}`,
+      };
+    }
+    return {
+      success: true,
+      data: json.data,
+      message: `Bitget Order Success: orderId=${json.data?.orderId || 'ok'}`,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Network error placing Bitget order: ${err.message}`,
+    };
+  }
+}
+
+export async function fetchRealBitgetAssets(config?: BitgetConfig): Promise<{
+  usdtAvailable: number;
+  assets: Array<{ coin: string; available: number; frozen: number }>;
+} | null> {
+  try {
+    const headers: Record<string, string> = {};
+    if (config?.apiKey) headers['x-bitget-key'] = config.apiKey;
+    if (config?.secretKey) headers['x-bitget-secret'] = config.secretKey;
+    if (config?.passphrase) headers['x-bitget-passphrase'] = config.passphrase;
+
+    const res = await fetch('/api/bitget?action=assets', { headers });
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (json.code !== '00000' || !Array.isArray(json.data)) return null;
+
+    let usdtAvailable = 0;
+    const assets: Array<{ coin: string; available: number; frozen: number }> = [];
+
+    for (const item of json.data) {
+      const coin = item.coin || '';
+      const avail = parseFloat(item.available || '0');
+      const frozen = parseFloat(item.frozen || '0');
+      if (coin === 'USDT') {
+        usdtAvailable = avail;
+      }
+      if (avail > 0 || frozen > 0) {
+        assets.push({ coin, available: avail, frozen });
+      }
+    }
+    return { usdtAvailable, assets };
+  } catch {
+    return null;
+  }
+}
+
 // Load Spot Holdings
 export function loadSpotHoldings(): SpotHolding[] {
   if (typeof window === 'undefined') return [];
@@ -220,17 +366,38 @@ export function saveSpotHoldings(holdings: SpotHolding[]) {
   }
 }
 
-// Core Execution: BUY TRANCHE (DCA Average Cost Engine)
-export function executeSpotBuyTranche(
+// Core Execution: BUY TRANCHE (DCA Average Cost Engine - Real & Paper)
+export async function executeSpotBuyTranche(
   symbol: string,
   price: number,
   usdtAmount: number,
   config: BitgetConfig
-): { success: boolean; message: string; updatedHoldings: SpotHolding[] } {
+): Promise<{ success: boolean; message: string; updatedHoldings: SpotHolding[] }> {
   const holdings = loadSpotHoldings();
   const existingIdx = holdings.findIndex(h => h.symbol === symbol);
   const coinsBought = usdtAmount / price;
   const nowStr = new Date().toLocaleTimeString();
+
+  // If in Real Live Trading mode, submit to Bitget
+  if (!config.isPaperTrading) {
+    const orderRes = await executeRealBitgetOrder(
+      {
+        symbol,
+        side: 'buy',
+        orderType: 'market',
+        size: String(usdtAmount),
+      },
+      config
+    );
+
+    if (!orderRes.success) {
+      return {
+        success: false,
+        message: `🚨 ส่งออเดอร์ Bitget ไม่สำเร็จ: ${orderRes.message}`,
+        updatedHoldings: holdings,
+      };
+    }
+  }
 
   if (existingIdx >= 0) {
     const existing = holdings[existingIdx];
@@ -265,15 +432,15 @@ export function executeSpotBuyTranche(
     holdings[existingIdx] = updated;
     saveSpotHoldings(holdings);
 
-    // Deduct paper balance if paper trading
     if (config.isPaperTrading) {
       const curBal = getPaperBalance();
       setPaperBalance(Math.max(0, curBal - usdtAmount));
     }
 
+    const modeTag = config.isPaperTrading ? '[PAPER]' : '🔥[REAL BITGET]';
     return {
       success: true,
-      message: `✓ เข้าซื้อ ${symbol} ไม้ที่ ${newTranches}/${config.maxTranches} @ $${price} (ต้นทุนเฉลี่ยใหม่: $${updated.avgCostPrice})`,
+      message: `✓ ${modeTag} เข้าซื้อ ${symbol} ไม้ที่ ${newTranches}/${config.maxTranches} @ $${price} (ต้นทุนเฉลี่ยใหม่: $${updated.avgCostPrice})`,
       updatedHoldings: holdings,
     };
   } else {
@@ -312,20 +479,22 @@ export function executeSpotBuyTranche(
       setPaperBalance(Math.max(0, curBal - usdtAmount));
     }
 
+    const modeTag = config.isPaperTrading ? '[PAPER]' : '🔥[REAL BITGET]';
     return {
       success: true,
-      message: `✓ เปิดไม้แรก ${symbol} [1/${config.maxTranches}] @ $${price} สำเร็จ`,
+      message: `✓ ${modeTag} เปิดไม้แรก ${symbol} [1/${config.maxTranches}] @ $${price} สำเร็จ`,
       updatedHoldings: holdings,
     };
   }
 }
 
-// Core Execution: SELL OR CUT LOSS 100%
-export function executeSpotSell(
+// Core Execution: SELL OR CUT LOSS 100% (Real & Paper)
+export async function executeSpotSell(
   symbol: string,
   currentPrice: number,
-  isCutLoss = false
-): { success: boolean; message: string; realizedPnl: number; updatedHoldings: SpotHolding[] } {
+  isCutLoss = false,
+  config?: BitgetConfig
+): Promise<{ success: boolean; message: string; realizedPnl: number; updatedHoldings: SpotHolding[] }> {
   const holdings = loadSpotHoldings();
   const idx = holdings.findIndex(h => h.symbol === symbol);
   if (idx === -1) {
@@ -333,6 +502,31 @@ export function executeSpotSell(
   }
 
   const h = holdings[idx];
+
+  // If in Real Live Trading mode, submit to Bitget
+  if (config && !config.isPaperTrading) {
+    // Format precision appropriately (e.g. 4 decimals)
+    const sellSize = Number(h.totalAmount).toFixed(4);
+    const orderRes = await executeRealBitgetOrder(
+      {
+        symbol,
+        side: 'sell',
+        orderType: 'market',
+        size: sellSize,
+      },
+      config
+    );
+
+    if (!orderRes.success) {
+      return {
+        success: false,
+        message: `🚨 ขายจริงบน Bitget ไม่สำเร็จ: ${orderRes.message}`,
+        realizedPnl: 0,
+        updatedHoldings: holdings,
+      };
+    }
+  }
+
   const totalReturnUsdt = h.totalAmount * currentPrice;
   const realizedPnl = totalReturnUsdt - h.totalInvestedUsdt;
   const pnlPct = ((currentPrice - h.avgCostPrice) / h.avgCostPrice) * 100;
@@ -341,18 +535,21 @@ export function executeSpotSell(
   holdings.splice(idx, 1);
   saveSpotHoldings(holdings);
 
-  // Return funds to paper balance
-  const curBal = getPaperBalance();
-  setPaperBalance(curBal + totalReturnUsdt);
+  // Return funds to paper balance if paper trading
+  if (!config || config.isPaperTrading) {
+    const curBal = getPaperBalance();
+    setPaperBalance(curBal + totalReturnUsdt);
+  }
 
   // If it's a cut loss, set 3-hour cooldown
   if (isCutLoss) {
     setCooldown(symbol, 3);
   }
 
+  const modeTag = config && !config.isPaperTrading ? '🔥[REAL LIVE] ' : '';
   const pnlSign = realizedPnl >= 0 ? '+' : '';
   const actionText = isCutLoss ? '🚨 CUT LOSS' : '🎯 TAKE PROFIT';
-  const msg = `${actionText} ${symbol} @ $${currentPrice}: กำไรสุทธิ ${pnlSign}$${realizedPnl.toFixed(2)} (${pnlSign}${pnlPct.toFixed(2)}%) คืน USDT เรียบร้อยแล้ว`;
+  const msg = `${modeTag}${actionText} ${symbol} @ $${currentPrice}: กำไรสุทธิ ${pnlSign}$${realizedPnl.toFixed(2)} (${pnlSign}${pnlPct.toFixed(2)}%) คืน USDT เรียบร้อยแล้ว`;
 
   return {
     success: true,
@@ -393,14 +590,14 @@ export function findWeakestHolding(holdings: SpotHolding[]): SpotHolding | null 
 }
 
 // Execute Rebalance Rotation (Sell weakest position, buy Grade A+ opportunity)
-export function executeRebalanceRotation(
+export async function executeRebalanceRotation(
   exitSymbol: string,
   entrySymbol: string,
   entryPrice: number,
   config: BitgetConfig
-): { success: boolean; message: string; updatedHoldings: SpotHolding[] } {
-  const sellRes = executeSpotSell(exitSymbol, 0, false);
-  const buyRes = executeSpotBuyTranche(entrySymbol, entryPrice, 500, config);
+): Promise<{ success: boolean; message: string; updatedHoldings: SpotHolding[] }> {
+  const sellRes = await executeSpotSell(exitSymbol, 0, false, config);
+  const buyRes = await executeSpotBuyTranche(entrySymbol, entryPrice, 500, config);
 
   const msg = `🔄 REBALANCE ROTATION: ปิดเหรียญนิ่ง ${exitSymbol} เสมอตัว -> ย้ายทุนเข้าโอกาสทอง ${entrySymbol} [1/${config.maxTranches}] @ $${entryPrice} ทันที`;
 
@@ -410,3 +607,4 @@ export function executeRebalanceRotation(
     updatedHoldings: buyRes.updatedHoldings,
   };
 }
+
