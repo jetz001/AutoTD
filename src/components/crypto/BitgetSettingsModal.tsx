@@ -5,7 +5,7 @@ import { Shield, Key, Lock, CheckCircle2, Sliders, X, Eye, EyeOff, AlertTriangle
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { BitgetConfig } from "@/services/bitgetSpot"
-import { loadBitgetConfig, saveBitgetConfig, EDGE_BOT_URL } from "@/services/bitgetSpot"
+import { loadBitgetConfig, saveBitgetConfig, syncBitgetConfigFromCloudflare, EDGE_BOT_URL } from "@/services/bitgetSpot"
 
 interface Props {
   isOpen: boolean
@@ -25,6 +25,18 @@ export function BitgetSettingsModal({ isOpen, onClose, onSave }: Props) {
       setCfg(loadBitgetConfig())
       setSavedSuccess(false)
       setTestResult(null)
+      // Check cloud config to make sure modal has newest state from Cloudflare
+      syncBitgetConfigFromCloudflare().then((synced) => {
+        if (synced) {
+          setCfg((prev) => ({
+            ...prev,
+            ...synced,
+            apiKey: synced.apiKey || prev.apiKey,
+            secretKey: synced.secretKey || prev.secretKey,
+            passphrase: synced.passphrase || prev.passphrase,
+          }))
+        }
+      })
     }
   }, [isOpen])
 

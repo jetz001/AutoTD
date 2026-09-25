@@ -72,17 +72,30 @@ export function CryptoPageClient() {
     recentLogs: loadQuantLogs(),
   })
 
-  // Auto-sync Bitget credentials from Cloudflare Pages Secrets if missing in localStorage
+  // Auto-sync Bitget config & credentials from Cloudflare Pages across PC and Mobile
   React.useEffect(() => {
     syncBitgetConfigFromCloudflare().then((synced) => {
-      if (synced && synced.apiKey) {
+      if (synced) {
         setConfig((prev) => {
-          if (!prev.apiKey || !prev.secretKey) {
-            const merged = { ...prev, ...synced }
-            saveBitgetConfig(merged)
-            return merged
+          const merged: BitgetConfig = {
+            ...prev,
+            ...synced,
+            apiKey: synced.apiKey || prev.apiKey,
+            secretKey: synced.secretKey || prev.secretKey,
+            passphrase: synced.passphrase || prev.passphrase,
+            openrouterApiKey: synced.openrouterApiKey || prev.openrouterApiKey,
+            isPaperTrading: typeof synced.isPaperTrading === "boolean" ? synced.isPaperTrading : prev.isPaperTrading,
+            autoPilotEnabled: typeof synced.autoPilotEnabled === "boolean" ? synced.autoPilotEnabled : prev.autoPilotEnabled,
+            tranchePercent: synced.tranchePercent ?? prev.tranchePercent,
+            takeProfitPercent: synced.takeProfitPercent ?? prev.takeProfitPercent,
+            cutLossPercent: synced.cutLossPercent ?? prev.cutLossPercent,
+            maxTranches: synced.maxTranches ?? prev.maxTranches,
+            maxCoins: synced.maxCoins ?? prev.maxCoins,
+            cashReservePercent: synced.cashReservePercent ?? prev.cashReservePercent,
+            autoRebalanceEnabled: typeof synced.autoRebalanceEnabled === "boolean" ? synced.autoRebalanceEnabled : prev.autoRebalanceEnabled,
           }
-          return prev
+          saveBitgetConfig(merged)
+          return merged
         })
       }
     })
@@ -470,16 +483,30 @@ export function CryptoPageClient() {
             <span>⚡ QUANT</span>
           </div>
 
-          {/* Mode Pill */}
-          <span
-            className={`rounded-lg px-2 py-1 text-[11px] font-bold border ${
+          {/* Mode Pill (Clickable toggle) */}
+          <button
+            type="button"
+            onClick={() => {
+              const newMode = !config.isPaperTrading
+              const newCfg = { ...config, isPaperTrading: newMode }
+              setConfig(newCfg)
+              saveBitgetConfig(newCfg)
+              setActionAlert(
+                newMode
+                  ? "🛡️ สลับเป็นโหมดจำลอง (Paper Trading) แล้ว ไม่เสียเงินจริง"
+                  : "🔥 สลับเป็นโหมดเทรดจริง (Live Bitget Spot) แล้ว"
+              )
+              setTimeout(() => setActionAlert(null), 3500)
+            }}
+            title="กดเพื่อสลับโหมด Paper / Live ได้ทันที"
+            className={`rounded-lg px-2.5 py-1 text-[11px] font-bold border transition-all cursor-pointer active:scale-95 ${
               config.isPaperTrading
-                ? "bg-amber-500/10 border-amber-500/30 text-amber-500"
-                : "bg-emerald-500/10 border-emerald-500/30 text-emerald-500"
+                ? "bg-amber-500/15 border-amber-500/40 text-amber-400 hover:bg-amber-500/25"
+                : "bg-emerald-500/15 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/25 shadow-[0_0_12px_rgba(16,185,129,0.25)]"
             }`}
           >
             {config.isPaperTrading ? "🛡️ PAPER" : "🔥 LIVE"}
-          </span>
+          </button>
 
           {/* Settings Trigger */}
           <Button
@@ -536,6 +563,32 @@ export function CryptoPageClient() {
           >
             <Zap className={`h-3 w-3 sm:h-3.5 sm:w-3.5 ${config.autoPilotEnabled ? "text-cyan-400 fill-cyan-400 animate-pulse" : ""}`} />
             <span>{config.autoPilotEnabled ? "⚡ FULL BOT [ON]" : "⏸️ BOT [OFF]"}</span>
+          </Button>
+
+          {/* Quick 1-Click Paper / Live Mode Toggle */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              const newMode = !config.isPaperTrading
+              const newCfg = { ...config, isPaperTrading: newMode }
+              setConfig(newCfg)
+              saveBitgetConfig(newCfg)
+              setActionAlert(
+                newMode
+                  ? "🛡️ สลับเป็นโหมดจำลอง (Paper Trading) แล้ว ปลอดภัย ไม่เสียเงินจริง"
+                  : "🔥 สลับเป็นโหมดเทรดจริง (Live Bitget Spot) แล้ว"
+              )
+              setTimeout(() => setActionAlert(null), 3500)
+            }}
+            className={`h-7 sm:h-8 gap-1 text-[11px] sm:text-xs font-bold justify-center transition-all ${
+              config.isPaperTrading
+                ? "bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20"
+                : "bg-emerald-500/10 text-emerald-400 border-emerald-500/40 hover:bg-emerald-500/20 shadow-[0_0_10px_rgba(16,185,129,0.2)]"
+            }`}
+          >
+            <Shield className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+            <span>{config.isPaperTrading ? "โหมด PAPER" : "โหมด LIVE"}</span>
           </Button>
 
           {/* Action 1: Spot AI Screener */}

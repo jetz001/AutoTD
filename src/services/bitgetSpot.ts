@@ -60,7 +60,7 @@ export function loadBitgetConfig(): BitgetConfig {
     secretKey: '',
     passphrase: '',
     openrouterApiKey: '',
-    isPaperTrading: false, // Default to Live if configured, or user toggleable
+    isPaperTrading: true, // Default to PAPER TRADING for safety across all devices
     autoPilotEnabled: true, // FULL BOT AUTO-PILOT ON BY DEFAULT
     tranchePercent: 20,     // 20% of available cash per tranche
     takeProfitPercent: 3.5,
@@ -83,6 +83,12 @@ export function loadBitgetConfig(): BitgetConfig {
 export function saveBitgetConfig(cfg: BitgetConfig) {
   if (typeof window !== 'undefined') {
     localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(cfg));
+    // Asynchronously sync to Cloudflare Pages so mobile and other devices get it immediately
+    fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg),
+    }).catch(() => {});
   }
 }
 
@@ -327,18 +333,26 @@ export async function triggerEdgeBotWake(reason = 'MANUAL_TRIGGER_FROM_DASHBOARD
   }
 }
 
-// Cloudflare Pages Secret Sync
+// Cloudflare Pages Config & Secret Sync across Mobile & Desktop
 export async function syncBitgetConfigFromCloudflare(): Promise<Partial<BitgetConfig> | null> {
   try {
+    const res = await fetch('/api/config');
+    if (res.ok) {
+      const json = await res.json();
+      if (json.code === '00000' && json.data) {
+        return json.data as Partial<BitgetConfig>;
+      }
+    }
+  } catch {}
+
+  // Fallback to legacy action if /api/config unavailable
+  try {
     const res = await fetch('/api/bitget?action=sync-config');
-    if (!res.ok) return null;
-    const json = await res.json();
-    if (json.code === '00000' && json.data?.hasCredentials) {
-      return {
-        apiKey: json.data.apiKey,
-        secretKey: json.data.secretKey,
-        passphrase: json.data.passphrase,
-      };
+    if (res.ok) {
+      const json = await res.json();
+      if (json.code === '00000' && json.data?.hasCredentials) {
+        return json.data;
+      }
     }
   } catch {}
   return null;

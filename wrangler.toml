@@ -1,0 +1,7 @@
+name = "autotd"
+compatibility_date = "2024-12-01"
+pages_build_output_dir = "out"
+
+[[kv_namespaces]]
+binding = "AUTOTD_KV"
+id = "bb8e501311f8491baf0827b635bd3ad8"
