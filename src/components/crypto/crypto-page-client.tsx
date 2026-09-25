@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Settings, Shield, Zap, RefreshCw, AlertCircle } from "lucide-react"
+import { Settings, Shield, Zap, RefreshCw, AlertCircle, Search, Layers, ShieldAlert } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { BitgetSettingsModal } from "./BitgetSettingsModal"
 import { QuantExecutiveBriefing } from "./QuantExecutiveBriefing"
@@ -220,6 +220,53 @@ export function CryptoPageClient() {
     runScanCycle()
   }
 
+  // Action 1: Take Profit All
+  const handleTakeProfitAll = () => {
+    if (holdings.length === 0) {
+      alert("ไม่มีเหรียญในพอร์ตที่สามารถขายทำกำไรได้")
+      return
+    }
+    if (!confirm(`ยืนยันการขายทำกำไรทุกเหรียญ (${holdings.length} เหรียญ) ด้วยราคาตลาดทันที?`)) return
+
+    let totalRealized = 0
+    let currentH = [...holdings]
+    for (const h of holdings) {
+      const res = executeSpotSell(h.symbol, h.currentPrice, false)
+      totalRealized += res.realizedPnl
+      currentH = res.updatedHoldings
+    }
+    setHoldings(currentH)
+    setActionAlert(`🎯 TAKE PROFIT สำเร็จ: ขายปิดทำกำไรรวมทุกเหรียญ สรุปกำไรสุทธิ ${totalRealized >= 0 ? '+' : ''}$${totalRealized.toFixed(2)}`)
+    setTimeout(() => setActionAlert(null), 5000)
+    runScanCycle()
+  }
+
+  // Action 2: Emergency Panic Cut Loss & Cooldown
+  const handleEmergencyPanicCutLoss = () => {
+    if (holdings.length === 0) {
+      alert("ไม่มีเหรียญในพอร์ตที่ต้องคัทลอส")
+      return
+    }
+    if (!confirm(`🚨 คำเตือนความเสี่ยง: ยืนยันการคัทลอสฉุกเฉินปิดพอร์ต 100% ทุกเหรียญ (${holdings.length} เหรียญ) และล็อค Cooldown 3 ชม. ห้ามเข้าไม้ซ้ำ?`)) return
+
+    let currentH = [...holdings]
+    for (const h of holdings) {
+      const res = executeSpotSell(h.symbol, h.currentPrice, true)
+      currentH = res.updatedHoldings
+    }
+    setHoldings(currentH)
+    setActionAlert(`🚨 EMERGENCY PANIC STOP: คัทลอสทุกเหรียญและล็อค Cooldown 3 ชม. เรียบร้อยแล้ว`)
+    setTimeout(() => setActionAlert(null), 5000)
+    runScanCycle()
+  }
+
+  // Action 3: Recalculate & Sync Avg Cost
+  const handleRecalculateAvgCost = () => {
+    runScanCycle()
+    setActionAlert(`💼 ซิงก์ราคาตลาดสด & อัปเดตคำนวณต้นทุนเฉลี่ยถ่วงน้ำหนักทุกไม้เรียบร้อย`)
+    setTimeout(() => setActionAlert(null), 3000)
+  }
+
   const selectedHolding = holdings.find((h) => h.symbol === selectedSymbol)
   const selectedPrice = priceMap[selectedSymbol] ?? (selectedHolding?.currentPrice || 0)
   const totalBalance = getPaperBalance() + holdings.reduce((sum, h) => sum + (h.totalAmount * h.currentPrice), 0)
@@ -299,6 +346,65 @@ export function CryptoPageClient() {
           <button onClick={() => setActionAlert(null)} className="text-muted-foreground hover:text-foreground">✕</button>
         </div>
       )}
+
+      {/* 🚀 QUICK ACTION COMMAND BAR (ปุ่มสั่งการทำงานของ Quant) */}
+      <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-border/80 bg-card/70 p-2.5 backdrop-blur-md shadow-sm">
+        <div className="flex items-center gap-2">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400 font-bold text-xs">
+            ⚡
+          </div>
+          <span className="text-xs font-bold text-foreground">ปุ่มสั่งการ QUANT AI:</span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Action 1: Spot AI Screener */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={runScanCycle}
+            disabled={isScanning}
+            className="h-8 gap-1.5 text-xs font-bold text-sky-400 border-sky-500/30 hover:bg-sky-500/10"
+          >
+            <Search className={`h-3.5 w-3.5 ${isScanning ? "animate-spin" : ""}`} />
+            <span>สแกนตลาด (Spot Screener)</span>
+          </Button>
+
+          {/* Action 2: ต้นทุนเฉลี่ย (Avg Cost) */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleRecalculateAvgCost}
+            className="h-8 gap-1.5 text-xs font-bold text-purple-400 border-purple-500/30 hover:bg-purple-500/10"
+          >
+            <Layers className="h-3.5 w-3.5" />
+            <span>คำนวณต้นทุนเฉลี่ย (DCA Avg)</span>
+          </Button>
+
+          {/* Action 3: Take Profit Engine */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleTakeProfitAll}
+            disabled={holdings.length === 0}
+            className="h-8 gap-1.5 text-xs font-bold text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
+          >
+            <Zap className="h-3.5 w-3.5" />
+            <span>ล็อคกำไรทั้งหมด (Take Profit)</span>
+          </Button>
+
+          {/* Action 4: Cut-Loss & Cooldown */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleEmergencyPanicCutLoss}
+            disabled={holdings.length === 0}
+            className="h-8 gap-1.5 text-xs font-bold text-rose-400 border-rose-500/40 hover:bg-rose-500/10"
+          >
+            <ShieldAlert className="h-3.5 w-3.5" />
+            <span>คัทลอสฉุกเฉิน (Cut-Loss & Cooldown)</span>
+          </Button>
+        </div>
+      </div>
 
       {/* 1. Quant Commander Executive Briefing */}
       <QuantExecutiveBriefing

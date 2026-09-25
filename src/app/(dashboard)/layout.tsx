@@ -1,13 +1,5 @@
-import { AppSidebar } from "@/components/app-sidebar"
 import { CommandPalette } from "@/components/command-palette"
-import { DynamicBreadcrumb } from "@/components/dynamic-breadcrumb"
 import { ThemeToggle } from "@/components/theme-toggle"
-import { Separator } from "@/components/ui/separator"
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar"
 
 export default function DashboardLayout({
   children,
@@ -15,28 +7,30 @@ export default function DashboardLayout({
   children: React.ReactNode
 }) {
   return (
-    <SidebarProvider>
-      <AppSidebar />
-      <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center gap-2">
-          <div className="flex items-center gap-2 px-4">
-            <SidebarTrigger className="-ml-1" />
-            <Separator
-              orientation="vertical"
-              className="mr-2 data-vertical:h-4 data-vertical:self-auto"
-            />
-            <DynamicBreadcrumb />
+    <div className="min-h-screen flex flex-col bg-background text-foreground">
+      {/* Top utility bar */}
+      <header className="flex h-12 shrink-0 items-center justify-between border-b px-4 bg-card/60 backdrop-blur-md">
+        <div className="flex items-center gap-2">
+          <div className="flex h-6 w-6 items-center justify-center rounded bg-emerald-500/20 text-emerald-400 font-black text-[11px] border border-emerald-500/30">
+            Q
           </div>
-          <div className="ml-auto flex items-center gap-2 pr-4">
-            <kbd className="pointer-events-none hidden h-6 select-none items-center gap-1 rounded border bg-muted px-2 font-mono text-[10px] font-medium text-muted-foreground sm:flex">
-              <span className="text-xs">⌘</span>K
-            </kbd>
-            <ThemeToggle />
-          </div>
-        </header>
-        <CommandPalette />
-        <main className="flex flex-1 flex-col">{children}</main>
-      </SidebarInset>
-    </SidebarProvider>
+          <span className="text-xs font-bold tracking-tight text-foreground">
+            AutoTD Quant AI Desk
+          </span>
+          <span className="text-[10px] text-muted-foreground hidden sm:inline">
+            | Full Width Terminal
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <kbd className="pointer-events-none hidden h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[9px] font-medium text-muted-foreground sm:flex">
+            <span className="text-[10px]">⌘</span>K
+          </kbd>
+          <ThemeToggle />
+        </div>
+      </header>
+
+      <CommandPalette />
+      <main className="flex-1 w-full p-2 sm:p-4">{children}</main>
+    </div>
   )
 }
