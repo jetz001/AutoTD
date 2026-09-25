@@ -1,5 +1,6 @@
 import { CommandPalette } from "@/components/command-palette"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { GmailSecurityGate } from "@/components/crypto/GmailSecurityGate"
 
 export default function DashboardLayout({
   children,
@@ -7,7 +8,8 @@ export default function DashboardLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="min-h-screen flex flex-col bg-background text-foreground">
+    <GmailSecurityGate>
+      <div className="min-h-screen flex flex-col bg-background text-foreground">
       {/* Top utility bar */}
       <header className="flex h-12 shrink-0 items-center justify-between border-b px-4 bg-card/60 backdrop-blur-md">
         <div className="flex items-center gap-2">
@@ -32,5 +34,6 @@ export default function DashboardLayout({
       <CommandPalette />
       <main className="flex-1 w-full p-2 sm:p-4">{children}</main>
     </div>
+    </GmailSecurityGate>
   )
 }
