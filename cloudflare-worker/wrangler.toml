@@ -1,0 +1,19 @@
+name = "bitget-ai-trader"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+# Serve static dashboard UI
+assets = { directory = "./public", binding = "ASSETS" }
+
+# Cron triggers: ปลุกทุก 5 นาที (สามารถปรับเปลี่ยนได้ เช่น */15 สำหรับทุก 15 นาที)
+[triggers]
+crons = ["*/5 * * * *"]
+
+# Environment Variables (ค่าเริ่มต้น หรือกำหนดผ่าน wrangler secret put)
+[vars]
+TRADING_MODE = "FUTURES" # "SPOT", "FUTURES", หรือ "BOTH"
+DEFAULT_SYMBOL = "BTCUSDT"
+MAX_LEVERAGE = "3"
+MAX_RISK_PERCENT = "5"
+PAPER_TRADING = "true" # ตั้งเป็น "false" เมื่อต้องการเทรดเงินจริง
+AI_PROVIDER = "openai" # "openai", "claude", หรือ "gemini"

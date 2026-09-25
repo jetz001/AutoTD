@@ -1,113 +1,100 @@
-<div align="center">
+# AutoTD - Bitget Spot Quant Trading Terminal
 
-# Shadcn Fintech
+Autonomous Quantitative Trading Terminal & DCA Multi-Tranche Engine exclusively engineered for **Bitget Spot**, powered by Next.js 16 (Turbopack), Tailwind CSS, Shadcn UI, and TradingView Lightweight Charts.
 
-A premium, open-source fintech dashboard built with Next.js, shadcn/ui, and Tailwind CSS.
+---
 
-[![CI](https://github.com/abderrahimghazali/shadcn-fintech/actions/workflows/ci.yml/badge.svg)](https://github.com/abderrahimghazali/shadcn-fintech/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-black.svg)](LICENSE)
-[![Next.js](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org)
-[![shadcn/ui](https://img.shields.io/badge/shadcn%2Fui-latest-black)](https://ui.shadcn.com)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind-v4-black)](https://tailwindcss.com)
-[![TypeScript](https://img.shields.io/badge/TypeScript-strict-black)](https://typescriptlang.org)
+## 🎯 Key Strategy & System Architecture
 
-[Live Demo](https://shadcn-fintech.vercel.app) · [Report Bug](https://github.com/abderrahimghazali/shadcn-fintech/issues) · [Request Feature](https://github.com/abderrahimghazali/shadcn-fintech/issues)
+1. **Spot Exclusive (Pure Spot - Zero Liquidation Risk):**
+   - Focuses strictly on Bitget Spot (Top 20 USDT pairs by 24h volume).
+   - Designed for capital preservation and high-win-rate swing DCA.
 
-![Shadcn Fintech Dashboard](public/screenshots/shadcn-fintech.png)
+2. **Dip-in-Uptrend AI Screener:**
+   - Real-time screening across 1H / 4H trend direction and 15m RSI oversold/pullback levels (35–45 zone).
+   - AI Score (0–100) categorization:
+     - 🟢 **น่าซื้อ (Dip in Uptrend):** Strong bullish trend on pullback.
+     - 🟡 **รอดู (Watch):** Neutral / waiting for entry trigger.
+     - ⛔ **Cooldown:** Locked for 3 hours after a cut-loss to prevent revenge trading.
+     - 🔄 **โอกาส A+:** High momentum breakthrough candidates.
 
-</div>
+3. **Weighted Average Cost Engine (แก้ปัญหางงหลายไม้):**
+   - Automatically computes exact weighted average cost: $\sum(\text{Price} \times \text{Size}) / \sum(\text{Size})$.
+   - Enforces a minimum $-2.0\%$ to $-3.0\%$ pullback between tranches before allowing subsequent entries.
+   - Max 3–4 tranches per coin.
 
-## Features
+4. **Cut-Loss & 3-Hour Cooldown ("คัทเป็น ไม่ติดดอย"):**
+   - Automated Hard Stop at $-5.0\%$ to $-7.0\%$ from average cost.
+   - 1-Click Panic / Market Cut Loss.
+   - Immediate 3-hour lockout for stopped-out coins.
 
-- **11 fully built pages** — Dashboard, Accounts, Transactions, Transfers, Cards, Crypto, Analytics, Investments, Budgets, Settings, Notifications
-- **Crypto dashboard** — Candlestick chart, live portfolio, trade form, market overview with 8 coins
-- **Drag-and-drop dashboard** — Rearrange widgets with dnd-kit, persisted to localStorage
-- **Interactive credit cards** — 3D flip animation, freeze toggle, virtual card generator
-- **Live investment ticker** — Simulated real-time price updates with flash animations
-- **Spending heatmap** — GitHub-style 365-day calendar visualization
-- **Actionable notifications** — Accept/decline money requests and device authorization inline
-- **Smart analytics** — Category drill-down donuts, recurring charge detector, AI insights
-- **Budget tracking** — Animated SVG progress rings, savings goals, month projection
-- **Quick transfers** — Contact selector with send simulation
-- **Auth pages** — Sign in / sign up with animated 3D globe, powered by [Clerk](https://clerk.com)
-- **Dark mode** — Full dark/light/system theme support
-- **Responsive** — Works on desktop, tablet, and mobile
+5. **Opportunity Rebalancing (ถ้าไม้เต็มมือแต่โอกาส A+ มา):**
+   - Automatically detects when portfolio slots are full.
+   - Allows Quant to rotate capital out of the weakest/stagnant position (PnL $\approx 0\%$) directly into high-momentum Grade A+ assets.
 
-## Pages
+6. **Dual Mode Trading:**
+   - 🛡️ **Paper Trading:** Pre-funded \$10,000 USDT simulation.
+   - 🔥 **Real Trading:** Direct integration with Bitget V2 API via secure HMAC-SHA256 authenticated endpoints.
 
-| Page | Description |
-|------|-------------|
-| `/dashboard` | Financial overview, wallet cards, quick transfer, spending limit, money movement |
-| `/accounts` | Linked bank accounts with balances, add account flow |
-| `/transactions` | Searchable table with filters, expandable rows, bulk CSV export |
-| `/transfers` | Send/receive/scheduled transfers with stats and quick send |
-| `/cards` | 3D flip card, freeze/unfreeze, spending controls, virtual card creator |
-| `/analytics` | Spending heatmap, category breakdown, recurring charges, AI insights |
-| `/crypto` | Candlestick chart, portfolio balance, top coins, trade form, market overview |
-| `/investments` | Portfolio allocation, holdings with sparklines, live ticker, watchlist |
-| `/budgets` | Budget rings, savings goals, spending calendar, month projection |
-| `/settings` | Profile, security, notifications, billing, appearance |
-| `/notifications` | Filterable notification feed with dismiss animations |
-| `/sign-in` | Auth page with animated 3D globe, social login, powered by Clerk |
-| `/sign-up` | Registration with name, email, password, terms acceptance |
+7. **TradingView Lightweight Charts v5:**
+   - Real-time Bitget Spot candlestick chart.
+   - Dynamic overlay lines:
+     - 🔵 **Blue Dashed:** Weighted Average Cost Line
+     - 🟢 **Green Dotted:** Take Profit Target (+3.5%)
+     - 🔴 **Red Dotted:** Cut Loss Stop (-5.0%)
 
-## Tech Stack
+---
 
-| | Technology |
-|---|---|
-| Framework | [Next.js 16](https://nextjs.org) (App Router) |
-| UI | [shadcn/ui](https://ui.shadcn.com) |
-| Styling | [Tailwind CSS v4](https://tailwindcss.com) |
-| Charts | [Recharts](https://recharts.org) |
-| Animations | [Motion](https://motion.dev) |
-| Drag & Drop | [@dnd-kit](https://dndkit.com) |
-| Auth | [Clerk](https://clerk.com) |
-| 3D Globe | [three-globe](https://github.com/vasturiano/three-globe) + [Aceternity UI](https://ui.aceternity.com) |
-| Icons | [Lucide React](https://lucide.dev) |
-| Language | TypeScript |
+## 🚀 Quick Start
 
-## Getting Started
-
+### 1. Install Dependencies
 ```bash
-git clone https://github.com/abderrahimghazali/shadcn-fintech.git
-cd shadcn-fintech
-pnpm install
-pnpm dev
+npm install --legacy-peer-deps
 ```
 
-Open [http://localhost:3000](http://localhost:3000) to see the dashboard.
+### 2. Configure Environment Variables
+Copy `.env.example` to `.env.local`:
+```bash
+cp .env.example .env.local
+```
+Fill in your Bitget API credentials:
+```env
+NEXT_PUBLIC_BITGET_API_KEY=your_bitget_api_key
+BITGET_SECRET_KEY=your_bitget_secret_key
+BITGET_PASSPHRASE=your_passphrase
+```
 
-## Customization
+### 3. Run Development Server
+```bash
+npm run dev
+```
+Open [http://localhost:3000](http://localhost:3000) (automatically redirects to `/crypto`).
 
-**Theme** — Edit `src/app/globals.css` to customize colors. Full dark mode support via CSS variables.
+---
 
-**Mock Data** — All demo data lives in `src/data/seed.ts`. Replace with your own data or connect to a real API.
+## 📁 Project Structure
 
-**Dashboard Layout** — Click "Customize" on the dashboard to drag and rearrange widgets. Persists to localStorage.
+```
+├── src/
+│   ├── app/
+│   │   ├── api/bitget/route.ts      # Bitget V2 HMAC-SHA256 proxy route
+│   │   ├── crypto/page.tsx          # Main Terminal Page
+│   │   └── page.tsx                 # Root redirect to /crypto
+│   ├── components/crypto/
+│   │   ├── crypto-page-client.tsx   # Quant state sync & orchestrator
+│   │   ├── QuantExecutiveBriefing.tsx # Goal progress & Quant logs
+│   │   ├── SpotScreenerCard.tsx     # Dip-in-Uptrend AI scanner table
+│   │   ├── SpotHoldingsAvgCostCard.tsx # Weighted Avg Cost & Tranche tracker
+│   │   ├── RealTradingChart.tsx     # Lightweight Charts with 3 dynamic lines
+│   │   └── BitgetSettingsModal.tsx  # API key & risk parameters dialog
+│   └── services/
+│       ├── bitgetSpot.ts            # Bitget Spot V2 API & Paper DCA engine
+│       └── quantEngine.ts           # Screener & Strategy decision algorithms
+└── cloudflare-worker/               # Optional Edge cron bot for 24/7 scanning
+```
 
-## Sponsor this project
+---
 
-This project is free and open-source. If it helped you build something, saved you time, or you just think it's cool — consider supporting its development. Your sponsorship helps keep this project maintained, improved, and free for everyone.
-
-<a href="https://github.com/sponsors/abderrahimghazali">
-  <img src="https://img.shields.io/badge/Sponsor-GitHub-ea4aaa?logo=github&logoColor=white" alt="Sponsor on GitHub" />
-</a>
-<a href="https://buymeacoffee.com/abderrahimghazali">
-  <img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee" />
-</a>
-
-Every star, share, and contribution also goes a long way. Thank you for your support!
-
-## License
-
-Licensed under the [MIT License](LICENSE).
-
-## Author
-
-Created with ❤️ by **[Abderrahim Ghazali](https://github.com/abderrahimghazali)**
-
-Need help getting started or have a question? Feel free to reach out — I'm happy to help.
-
-<a href="https://cal.com/abderrahimghazali/15min?overlayCalendar=true">
-  <img src="https://img.shields.io/badge/Book%20a%20call-Cal.com-292929?logo=cal.com&logoColor=white" alt="Book a call" />
-</a>
+## 🛡️ Security Note
+- **Never commit `.env.local` or secret keys to GitHub.**
+- Bitget API permissions only require **Read** and **Spot Trade**. **NEVER enable Withdrawal**.
