@@ -34,6 +34,9 @@ export function BitgetSettingsModal({ isOpen, onClose, onSave }: Props) {
             apiKey: synced.apiKey || prev.apiKey,
             secretKey: synced.secretKey || prev.secretKey,
             passphrase: synced.passphrase || prev.passphrase,
+            autoPilotEnabled: typeof synced.autoPilotEnabled === 'boolean' ? synced.autoPilotEnabled : prev.autoPilotEnabled,
+            isPaperTrading: typeof synced.isPaperTrading === 'boolean' ? synced.isPaperTrading : prev.isPaperTrading,
+            autoRebalanceEnabled: typeof synced.autoRebalanceEnabled === 'boolean' ? synced.autoRebalanceEnabled : prev.autoRebalanceEnabled,
           }))
         }
       })
@@ -350,32 +353,52 @@ export function BitgetSettingsModal({ isOpen, onClose, onSave }: Props) {
             </div>
 
             {/* Auto-Pilot Full Bot Switch */}
-            <div className="flex items-center justify-between rounded border border-cyan-500/30 p-2.5 bg-cyan-500/10 mt-2">
-              <div>
-                <div className="font-semibold text-xs text-cyan-400">
-                  ⚡ FULL BOT AUTO-PILOT (เข้าซื้อ & ขายอัตโนมัติเต็มระบบ)
+            <div className={`flex items-center justify-between rounded-lg border p-3 mt-2 transition-all ${
+              cfg.autoPilotEnabled 
+                ? "border-cyan-500/50 bg-cyan-500/10 shadow-[0_0_15px_rgba(6,182,212,0.15)]" 
+                : "border-border bg-muted/20"
+            }`}>
+              <div className="pr-2">
+                <div className="flex items-center gap-1.5 font-semibold text-xs text-cyan-400">
+                  <span>⚡ FULL BOT AUTO-PILOT</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                    cfg.autoPilotEnabled ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-muted text-muted-foreground border border-border"
+                  }`}>
+                    {cfg.autoPilotEnabled ? "● เปิดทำงานอยู่ (ON)" : "○ ปิดอยู่ (OFF)"}
+                  </span>
                 </div>
-                <div className="text-[10px] text-muted-foreground">
-                  เมื่อเปิด: บอทจะคัดเหรียญ ส่ง AI คอนเฟิร์ม ซื้อไม้ 1, ซื้อ DCA, ขายทำกำไร, และคัทลอสโดยไม่ต้องกดเอง
+                <div className="text-[10px] text-muted-foreground mt-0.5">
+                  เมื่อเปิด: บอทจะวนสแกนทุก 5 วิ คัดเหรียญ ส่ง OpenRouter AI คอนเฟิร์ม ซื้อไม้ 1, ซื้อ DCA, ขายทำกำไร TP, และคัทลอสอัตโนมัติเต็มรูปแบบ
                 </div>
               </div>
               <Button
                 variant={cfg.autoPilotEnabled ? "default" : "outline"}
                 size="sm"
                 onClick={() => setCfg({ ...cfg, autoPilotEnabled: !cfg.autoPilotEnabled })}
-                className={`font-bold h-7 text-xs ${cfg.autoPilotEnabled ? "bg-cyan-500 hover:bg-cyan-600 text-black" : ""}`}
+                className={`font-bold h-8 px-3 text-xs shrink-0 transition-all ${
+                  cfg.autoPilotEnabled 
+                    ? "bg-cyan-500 hover:bg-cyan-400 text-black shadow-md" 
+                    : "border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/15"
+                }`}
               >
-                {cfg.autoPilotEnabled ? "เปิดใช้งาน" : "ปิด"}
+                {cfg.autoPilotEnabled ? "✓ เปิดใช้งานอยู่ (กดเพื่อปิด)" : "กดเปิดใช้งาน (TURN ON)"}
               </Button>
             </div>
 
             {/* Auto Rebalance Toggle */}
-            <div className="flex items-center justify-between rounded border p-2 bg-background/50 mt-2">
-              <div>
-                <div className="font-semibold text-[11px] text-foreground">
-                  🔄 หมุนเงินสลับตัวอัตโนมัติ (Auto Rebalance on Grade A+)
+            <div className={`flex items-center justify-between rounded-lg border p-2.5 mt-2 transition-all ${
+              cfg.autoRebalanceEnabled ? "border-purple-500/40 bg-purple-500/10" : "border-border bg-background/50"
+            }`}>
+              <div className="pr-2">
+                <div className="flex items-center gap-1.5 font-semibold text-[11px] text-foreground">
+                  <span>🔄 หมุนเงินสลับตัวอัตโนมัติ (Auto Rebalance on Grade A+)</span>
+                  <span className={`text-[9px] px-1 py-0.5 rounded font-bold ${
+                    cfg.autoRebalanceEnabled ? "bg-purple-500/20 text-purple-300 border border-purple-500/30" : "bg-muted text-muted-foreground border border-border"
+                  }`}>
+                    {cfg.autoRebalanceEnabled ? "● ON" : "○ OFF"}
+                  </span>
                 </div>
-                <div className="text-[10px] text-muted-foreground">
+                <div className="text-[10px] text-muted-foreground mt-0.5">
                   เมื่อไม้เต็มมือแล้วเจอเหรียญคะแนน ≥ 85 ให้ขายตัวนิ่งเสมอตัวเพื่อสลับเข้าตัวใหม่
                 </div>
               </div>
@@ -383,9 +406,11 @@ export function BitgetSettingsModal({ isOpen, onClose, onSave }: Props) {
                 variant={cfg.autoRebalanceEnabled ? "default" : "outline"}
                 size="sm"
                 onClick={() => setCfg({ ...cfg, autoRebalanceEnabled: !cfg.autoRebalanceEnabled })}
-                className="h-6 px-2 text-[10px] font-bold"
+                className={`h-7 px-2.5 text-[11px] font-bold shrink-0 ${
+                  cfg.autoRebalanceEnabled ? "bg-purple-600 hover:bg-purple-500 text-white" : "border-border"
+                }`}
               >
-                {cfg.autoRebalanceEnabled ? "เปิดใช้งาน (ON)" : "ปิด (OFF)"}
+                {cfg.autoRebalanceEnabled ? "✓ เปิดอยู่ (กดปิด)" : "กดเปิด (ON)"}
               </Button>
             </div>
           </div>
