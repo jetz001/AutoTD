@@ -18,6 +18,7 @@ import {
   executeSpotSell,
   updateHoldingsWithLivePrices,
   getPaperBalance,
+  setPaperBalance,
   findWeakestHolding,
   executeRebalanceRotation,
   fetchBatchRealRsi,
@@ -72,7 +73,7 @@ export function CryptoPageClient() {
     recentLogs: loadQuantLogs(),
   })
 
-  // Auto-sync Bitget config & credentials from Cloudflare Pages across PC and Mobile
+  // Auto-sync Bitget config & credentials & Paper Portfolio from Cloudflare Pages across PC and Mobile
   React.useEffect(() => {
     syncBitgetConfigFromCloudflare().then((synced) => {
       if (synced) {
@@ -97,6 +98,35 @@ export function CryptoPageClient() {
           saveBitgetConfig(merged)
           return merged
         })
+
+        // Cross-device Paper Portfolio & Balance Sync
+        const localHoldings = loadSpotHoldings()
+        if (Array.isArray(synced.holdings) && synced.holdings.length > 0) {
+          saveSpotHoldings(synced.holdings)
+          setHoldings(synced.holdings)
+        } else if (localHoldings.length > 0) {
+          saveSpotHoldings(localHoldings)
+        }
+
+        if (typeof synced.paperBalance === "number" && synced.paperBalance > 0) {
+          if (localHoldings.length === 0 && Array.isArray(synced.holdings) && synced.holdings.length > 0) {
+            setPaperBalance(synced.paperBalance)
+            setQuantState((prev) => ({ ...prev, cashReserveUsdt: synced.paperBalance! }))
+          } else if (getPaperBalance() === 10000 && synced.paperBalance !== 10000) {
+            setPaperBalance(synced.paperBalance)
+            setQuantState((prev) => ({ ...prev, cashReserveUsdt: synced.paperBalance! }))
+          }
+        } else if (getPaperBalance() !== 10000) {
+          setPaperBalance(getPaperBalance())
+        }
+
+        if (Array.isArray(synced.quantLogs) && synced.quantLogs.length > 0) {
+          const localLogs = loadQuantLogs()
+          if (localLogs.length <= 1) {
+            saveQuantLogs(synced.quantLogs)
+            setQuantState((prev) => ({ ...prev, recentLogs: synced.quantLogs! }))
+          }
+        }
       }
     })
   }, [])

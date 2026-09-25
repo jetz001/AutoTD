@@ -102,6 +102,11 @@ export function getPaperBalance(): number {
 export function setPaperBalance(amt: number) {
   if (typeof window !== 'undefined') {
     localStorage.setItem(STORAGE_KEY_PAPER_BALANCE, amt.toString());
+    fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paperBalance: amt }),
+    }).catch(() => {});
   }
 }
 
@@ -333,14 +338,20 @@ export async function triggerEdgeBotWake(reason = 'MANUAL_TRIGGER_FROM_DASHBOARD
   }
 }
 
+export interface SyncedCloudData extends Partial<BitgetConfig> {
+  paperBalance?: number;
+  holdings?: SpotHolding[];
+  quantLogs?: Array<{ id: string; time: string; action: string; symbol: string; note: string; color: string }>;
+}
+
 // Cloudflare Pages Config & Secret Sync across Mobile & Desktop
-export async function syncBitgetConfigFromCloudflare(): Promise<Partial<BitgetConfig> | null> {
+export async function syncBitgetConfigFromCloudflare(): Promise<SyncedCloudData | null> {
   try {
     const res = await fetch('/api/config');
     if (res.ok) {
       const json = await res.json();
       if (json.code === '00000' && json.data) {
-        return json.data as Partial<BitgetConfig>;
+        return json.data as SyncedCloudData;
       }
     }
   } catch {}
@@ -590,6 +601,11 @@ export function loadSpotHoldings(): SpotHolding[] {
 export function saveSpotHoldings(holdings: SpotHolding[]) {
   if (typeof window !== 'undefined') {
     localStorage.setItem(STORAGE_KEY_HOLDINGS, JSON.stringify(holdings));
+    fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ holdings, paperBalance: getPaperBalance() }),
+    }).catch(() => {});
   }
 }
 

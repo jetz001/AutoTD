@@ -87,7 +87,13 @@ export function loadQuantLogs(): Array<{ id: string; time: string; action: strin
 
 export function saveQuantLogs(logs: Array<{ id: string; time: string; action: string; symbol: string; note: string; color: string }>) {
   if (typeof window !== 'undefined') {
-    localStorage.setItem(STORAGE_KEY_QUANT_LOGS, JSON.stringify(logs.slice(0, 20)));
+    const sliced = logs.slice(0, 20);
+    localStorage.setItem(STORAGE_KEY_QUANT_LOGS, JSON.stringify(sliced));
+    fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ quantLogs: sliced }),
+    }).catch(() => {});
   }
 }
 

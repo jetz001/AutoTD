@@ -38,6 +38,9 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     maxCoins: 4,
     cashReservePercent: 30,
     autoRebalanceEnabled: true,
+    paperBalance: 10000,
+    holdings: [],
+    quantLogs: [],
   };
 
   let savedConfig: any = null;
@@ -89,15 +92,40 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     maxCoins: 4,
     cashReservePercent: 30,
     autoRebalanceEnabled: true,
+    paperBalance: 10000,
+    holdings: [],
+    quantLogs: [],
   };
 
   try {
     const body = (await request.json()) as any;
-    memoryConfigCache = { ...baseDefaults, ...body };
+
+    let currentSaved: any = {};
+    if (env.AUTOTD_KV) {
+      try {
+        const raw = await env.AUTOTD_KV.get("user_config");
+        if (raw) currentSaved = JSON.parse(raw);
+      } catch {}
+    }
+    if (Object.keys(currentSaved).length === 0 && memoryConfigCache) {
+      currentSaved = memoryConfigCache;
+    }
+
+    const merged = {
+      ...baseDefaults,
+      ...currentSaved,
+      ...body,
+      apiKey: body.apiKey || currentSaved.apiKey || baseDefaults.apiKey,
+      secretKey: body.secretKey || currentSaved.secretKey || baseDefaults.secretKey,
+      passphrase: body.passphrase || currentSaved.passphrase || baseDefaults.passphrase,
+      openrouterApiKey: body.openrouterApiKey || currentSaved.openrouterApiKey || baseDefaults.openrouterApiKey,
+    };
+
+    memoryConfigCache = merged;
 
     if (env.AUTOTD_KV) {
       try {
-        await env.AUTOTD_KV.put("user_config", JSON.stringify(memoryConfigCache));
+        await env.AUTOTD_KV.put("user_config", JSON.stringify(merged));
       } catch (kvErr) {
         console.warn("Failed to write to AUTOTD_KV:", kvErr);
       }
@@ -107,7 +135,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       {
         code: "00000",
         msg: "Config synced to Cloudflare successfully",
-        data: memoryConfigCache,
+        data: merged,
       },
       { headers: corsHeaders }
     );
