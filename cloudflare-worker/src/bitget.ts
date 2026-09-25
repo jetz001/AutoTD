@@ -75,7 +75,24 @@ export class BitgetClient {
     return data;
   }
 
-  // --- ข้อมูลตลาด (Market Data - Public) ---
+  // --- ข้อมูลตลาด Spot (Market Data - Public) ---
+  async getSpotTicker(symbol: string) {
+    const res = await fetch(`${this.baseUrl}/api/v2/spot/market/tickers?symbol=${symbol}`);
+    return await res.json();
+  }
+
+  async getSpotCandles(symbol: string, granularity = "15min", limit = "30") {
+    const validGranularity = granularity === "15m" ? "15min" : granularity;
+    const res = await fetch(`${this.baseUrl}/api/v2/spot/market/candles?symbol=${symbol}&granularity=${validGranularity}&limit=${limit}`);
+    return await res.json();
+  }
+
+  async getAllSpotTickers() {
+    const res = await fetch(`${this.baseUrl}/api/v2/spot/market/tickers`);
+    return await res.json();
+  }
+
+  // --- ข้อมูลตลาด Futures (Market Data - Public) ---
   async getTicker(symbol: string) {
     const res = await fetch(`${this.baseUrl}/api/v2/mix/market/ticker?symbol=${symbol}&productType=USDT-FUTURES`);
     return await res.json();
