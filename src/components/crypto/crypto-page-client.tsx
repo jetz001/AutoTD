@@ -24,6 +24,8 @@ import {
   fetchRealBitgetAssets,
   fetchEdgeBotStatus,
   triggerEdgeBotWake,
+  consultOpenRouterAgent,
+  calculateTrancheBudget,
   EDGE_BOT_URL,
   type BitgetConfig,
   type SpotHolding,
@@ -78,6 +80,9 @@ export function CryptoPageClient() {
     return map
   }, [tickers])
 
+  // Execution concurrency guard lock
+  const isExecutingTradeRef = React.useRef(false)
+
   // Fetch Tickers & Run Quant Engine (Real Market Data + Real RSI + Real Portfolio Check)
   const runScanCycle = React.useCallback(async () => {
     setIsScanning(true)
@@ -102,8 +107,8 @@ export function CryptoPageClient() {
         setHoldings(updatedHoldings)
         saveSpotHoldings(updatedHoldings)
 
-        // 4. Master Quant Check (Take Profit & Cut Loss rules)
-        const { decision, overallState } = runQuantPortfolioCheck(updatedHoldings, config)
+        // 4. Master Quant Check (Take Profit & Cut Loss & Candidate Auto-Buy)
+        const { decision, overallState } = runQuantPortfolioCheck(updatedHoldings, config, evaluated)
 
         // If in Real Live Mode, sync actual USDT balance from Bitget
         if (!config.isPaperTrading) {
@@ -132,36 +137,111 @@ export function CryptoPageClient() {
 
         setQuantState(overallState)
 
-        // 5. Auto-execute if decision triggered
-        if (decision) {
-          if (decision.action === "CUT_LOSS") {
-            const res = await executeSpotSell(decision.symbol, decision.price, true, config)
-            setHoldings(res.updatedHoldings)
-            setActionAlert(res.message)
-            const newLog = {
-              id: Date.now().toString(),
-              time: new Date().toLocaleTimeString(),
-              action: "🚨 CUT LOSS",
-              symbol: decision.symbol,
-              note: decision.reason,
-              color: "#ef4444",
+        // 5. FULL BOT EXECUTION: Autonomous Auto-Sell and Auto-Buy
+        if (config.autoPilotEnabled && decision && !isExecutingTradeRef.current) {
+          isExecutingTradeRef.current = true
+          try {
+            // 5.1 AUTO-SELL: CUT LOSS (100% Market Sell + 3h Cooldown)
+            if (decision.action === "CUT_LOSS") {
+              const res = await executeSpotSell(decision.symbol, decision.price, true, config)
+              setHoldings(res.updatedHoldings)
+              setActionAlert(`🚨 [AUTO CUT-LOSS] ${res.message}`)
+              setTimeout(() => setActionAlert(null), 5000)
+
+              const newLog = {
+                id: Date.now().toString(),
+                time: new Date().toLocaleTimeString(),
+                action: config.isPaperTrading ? "🚨 [AUTO] CUT LOSS" : "🔥🚨 [LIVE] CUT LOSS",
+                symbol: decision.symbol,
+                note: `${decision.reason} | ดึงเงินสดกลับกระเป๋าทันที`,
+                color: "#ef4444",
+              }
+              const logs = [newLog, ...loadQuantLogs()]
+              saveQuantLogs(logs)
             }
-            const logs = [newLog, ...loadQuantLogs()]
-            saveQuantLogs(logs)
-          } else if (decision.action === "TAKE_PROFIT") {
-            const res = await executeSpotSell(decision.symbol, decision.price, false, config)
-            setHoldings(res.updatedHoldings)
-            setActionAlert(res.message)
-            const newLog = {
-              id: Date.now().toString(),
-              time: new Date().toLocaleTimeString(),
-              action: "🎯 TAKE PROFIT",
-              symbol: decision.symbol,
-              note: decision.reason,
-              color: "#10b981",
+            // 5.2 AUTO-SELL: TAKE PROFIT (100% Market Sell on target)
+            else if (decision.action === "TAKE_PROFIT") {
+              const res = await executeSpotSell(decision.symbol, decision.price, false, config)
+              setHoldings(res.updatedHoldings)
+              setActionAlert(`🎯 [AUTO TAKE-PROFIT] ${res.message}`)
+              setTimeout(() => setActionAlert(null), 5000)
+
+              const newLog = {
+                id: Date.now().toString(),
+                time: new Date().toLocaleTimeString(),
+                action: config.isPaperTrading ? "🎯 [AUTO] TAKE PROFIT" : "🔥🎯 [LIVE] TAKE PROFIT",
+                symbol: decision.symbol,
+                note: `${decision.reason} | ล็อคกำไรสำเร็จ`,
+                color: "#10b981",
+              }
+              const logs = [newLog, ...loadQuantLogs()]
+              saveQuantLogs(logs)
             }
-            const logs = [newLog, ...loadQuantLogs()]
-            saveQuantLogs(logs)
+            // 5.3 AUTO-BUY: DCA TRANCHE or NEW TRANCHE 1 (Hybrid Quant + OpenRouter AI)
+            else if (decision.action === "BUY_TRANCHE") {
+              const availableCash = overallState.cashReserveUsdt
+              const isExisting = updatedHoldings.some((h) => h.symbol === decision.symbol)
+              
+              let shouldExecuteBuy = true
+              let aiReason = decision.reason
+
+              // For a new coin entry (Tranche 1), consult OpenRouter AI Agent on Cloudflare Pages
+              if (!isExisting) {
+                const targetTicker = evaluated.find((t) => t.symbol === decision.symbol)
+                const agentDecision = await consultOpenRouterAgent(
+                  {
+                    symbol: decision.symbol,
+                    currentPrice: decision.price,
+                    change24h: targetTicker?.change24h || 0,
+                    rsi15m: targetTicker?.rsi15m || 50,
+                    aiScore: targetTicker?.aiScore || 80,
+                  },
+                  config
+                )
+
+                if (agentDecision) {
+                  aiReason = `[AI: ${agentDecision.modelUsed}] ${agentDecision.reason}`
+                  if (agentDecision.action === "HOLD" && agentDecision.confidence < 70) {
+                    shouldExecuteBuy = false
+                  }
+                }
+              }
+
+              if (shouldExecuteBuy) {
+                const trancheBudget = calculateTrancheBudget(availableCash, config.tranchePercent)
+                const res = await executeSpotBuyTranche(decision.symbol, decision.price, trancheBudget, config)
+                setHoldings(res.updatedHoldings)
+                setActionAlert(`⚡ [AUTO BUY] ${res.message}`)
+                setTimeout(() => setActionAlert(null), 5000)
+
+                const newLog = {
+                  id: Date.now().toString(),
+                  time: new Date().toLocaleTimeString(),
+                  action: config.isPaperTrading ? "⚡ [AUTO] BUY TRANCHE" : "🔥⚡ [LIVE AUTO] BUY",
+                  symbol: decision.symbol,
+                  note: `${res.message} | ${aiReason}`,
+                  color: "#0ea5e9",
+                }
+                const logs = [newLog, ...loadQuantLogs()]
+                saveQuantLogs(logs)
+              } else {
+                // AI recommended to hold/wait
+                const newLog = {
+                  id: Date.now().toString(),
+                  time: new Date().toLocaleTimeString(),
+                  action: "⏸️ [AI HOLD]",
+                  symbol: decision.symbol,
+                  note: `AI แนะนำชะลอการเข้าซื้อ: ${aiReason}`,
+                  color: "#f59e0b",
+                }
+                const logs = [newLog, ...loadQuantLogs()]
+                saveQuantLogs(logs)
+              }
+            }
+          } catch (execErr: any) {
+            console.error("Auto execution error:", execErr)
+          } finally {
+            isExecutingTradeRef.current = false
           }
         }
       }
@@ -400,6 +480,30 @@ export function CryptoPageClient() {
         </div>
 
         <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5 sm:gap-2 w-full sm:w-auto">
+          {/* Master Full Bot Auto-Pilot Toggle */}
+          <Button
+            size="sm"
+            onClick={() => {
+              const newCfg = { ...config, autoPilotEnabled: !config.autoPilotEnabled }
+              setConfig(newCfg)
+              saveBitgetConfig(newCfg)
+              setActionAlert(
+                newCfg.autoPilotEnabled
+                  ? "⚡ เปิดระบบ FULL BOT AUTO-PILOT แล้ว (เข้าซื้อ & ขายอัตโนมัติเต็มรูปแบบ)"
+                  : "⏸️ พักระบบ AUTO-PILOT (สลับเป็นโหมดควบคุมด้วยตนเอง)"
+              )
+              setTimeout(() => setActionAlert(null), 4000)
+            }}
+            className={`h-7 sm:h-8 gap-1.5 text-[11px] sm:text-xs font-bold justify-center transition-all ${
+              config.autoPilotEnabled
+                ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/50 hover:bg-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.25)]"
+                : "bg-muted/40 text-muted-foreground border border-border hover:bg-muted"
+            }`}
+          >
+            <Zap className={`h-3 w-3 sm:h-3.5 sm:w-3.5 ${config.autoPilotEnabled ? "text-cyan-400 fill-cyan-400 animate-pulse" : ""}`} />
+            <span>{config.autoPilotEnabled ? "⚡ FULL BOT [ON]" : "⏸️ BOT [OFF]"}</span>
+          </Button>
+
           {/* Action 1: Spot AI Screener */}
           <Button
             size="sm"

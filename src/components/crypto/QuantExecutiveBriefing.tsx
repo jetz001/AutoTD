@@ -38,6 +38,11 @@ export function QuantExecutiveBriefing({ state, config }: Props) {
               }`}>
                 {config.isPaperTrading ? "🛡️ PAPER" : "🔥 LIVE BITGET"}
               </span>
+              <span className={`rounded-full px-2 py-0.5 text-[9px] sm:text-[10px] font-bold shrink-0 ${
+                config.autoPilotEnabled ? "bg-cyan-500/15 text-cyan-400 border border-cyan-500/30" : "bg-zinc-500/15 text-zinc-400"
+              }`}>
+                {config.autoPilotEnabled ? "⚡ FULL BOT ON" : "⏸️ BOT PAUSED"}
+              </span>
             </div>
             <p className="text-[11px] sm:text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5 truncate">
               <Activity className="h-3 w-3 text-emerald-500 animate-pulse shrink-0" />

@@ -179,7 +179,8 @@ export function evaluateScreener(
 // Master Quant Evaluator Loop (Checks Holdings for Take-Profit and Cut-Loss)
 export function runQuantPortfolioCheck(
   holdings: SpotHolding[],
-  config: BitgetConfig
+  config: BitgetConfig,
+  screenedCandidates?: SpotTickerItem[]
 ): {
   decision: QuantDecision | null;
   overallState: QuantExecutiveState;
@@ -189,9 +190,9 @@ export function runQuantPortfolioCheck(
   let status: QuantExecutiveState['status'] = 'SCANNING';
   let statusMessage = 'กำลังสแกนตลาด Top 20 Spot Bitget เพื่อหาจังหวะ Dip in Uptrend';
 
-  // Check each holding for Cut Loss or Take Profit
+  // 1. Check each holding for Cut Loss or Take Profit or DCA Tranche
   for (const h of holdings) {
-    // 1. Cut-Loss Check (-5% from Weighted Avg Cost)
+    // 1.1 Cut-Loss Check (-5% from Weighted Avg Cost)
     if (h.currentPrice <= h.cutLossPrice) {
       decision = {
         action: 'CUT_LOSS',
@@ -206,7 +207,7 @@ export function runQuantPortfolioCheck(
       break;
     }
 
-    // 2. Take-Profit Check (+3% to +5% from Weighted Avg Cost)
+    // 1.2 Take-Profit Check (+3% to +5% from Weighted Avg Cost)
     if (h.currentPrice >= h.takeProfitPrice) {
       decision = {
         action: 'TAKE_PROFIT',
@@ -219,6 +220,43 @@ export function runQuantPortfolioCheck(
       status = 'TAKING_PROFIT';
       statusMessage = `🎯 ถึงเป้ากำไร ${h.symbol} (+${h.pnlPercent.toFixed(1)}%) สั่งขายปิดทำกำไร`;
       break;
+    }
+
+    // 1.3 DCA Tranche Check (If price dropped >= 3% from avgCost and not reached max tranches)
+    if (h.tranchesCount < config.maxTranches && h.currentPrice <= h.avgCostPrice * 0.97) {
+      decision = {
+        action: 'BUY_TRANCHE',
+        symbol: h.symbol,
+        price: h.currentPrice,
+        reason: `ราคาลงมาลึก ${h.pnlPercent.toFixed(1)}% จากทุนเดิม $${h.avgCostPrice} เข้าเกณฑ์ DCA สะสมไม้ที่ ${h.tranchesCount + 1}/${config.maxTranches} เพื่อดึงต้นทุนเฉลี่ยลง`,
+        confidence: 88,
+        timestamp: new Date().toLocaleTimeString(),
+      };
+      status = 'ACCUMULATING';
+      statusMessage = `📉 สัญญาณเข้าซื้อ DCA ${h.symbol} ไม้ที่ ${h.tranchesCount + 1} ที่ $${h.currentPrice}`;
+      break;
+    }
+  }
+
+  // 2. If no holding action and portfolio has capacity (< maxCoins), check screened candidates
+  if (!decision && holdings.length < config.maxCoins && screenedCandidates && screenedCandidates.length > 0) {
+    const heldSymbols = new Set(holdings.map(h => h.symbol));
+    const buyableCandidates = screenedCandidates
+      .filter(c => !heldSymbols.has(c.symbol) && !isUnderCooldown(c.symbol) && ((c.aiScore || 0) >= 80 || c.signal === 'BUY_DIP'))
+      .sort((a, b) => (b.aiScore || 0) - (a.aiScore || 0));
+
+    if (buyableCandidates.length > 0) {
+      const topPick = buyableCandidates[0];
+      decision = {
+        action: 'BUY_TRANCHE',
+        symbol: topPick.symbol,
+        price: topPick.lastPr,
+        reason: `Quant คัดเลือก Dip in Uptrend เกรด A+ (คะแนน ${topPick.aiScore}/100, RSI 15m ${topPick.rsi15m}) เตรียมส่ง AI คอนเฟิร์มเข้าสะสมไม้ 1`,
+        confidence: topPick.aiScore || 85,
+        timestamp: new Date().toLocaleTimeString(),
+      };
+      status = 'ACCUMULATING';
+      statusMessage = `⚡ พบจังหวะซื้อ Dip in Uptrend: ${topPick.symbol} (Score ${topPick.aiScore}/100)`;
     }
   }
 

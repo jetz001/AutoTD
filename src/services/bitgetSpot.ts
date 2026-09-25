@@ -8,7 +8,10 @@ export interface BitgetConfig {
   apiKey: string;
   secretKey: string;
   passphrase: string;
+  openrouterApiKey?: string;
   isPaperTrading: boolean;
+  autoPilotEnabled: boolean;  // Master Auto-Pilot switch (ON/OFF)
+  tranchePercent: number;     // e.g. 20 = 20% of available USDT per tranche
   takeProfitPercent: number; // e.g. 3.0 = +3%
   cutLossPercent: number;     // e.g. 5.0 = -5%
   maxTranches: number;       // e.g. 4
@@ -56,7 +59,10 @@ export function loadBitgetConfig(): BitgetConfig {
     apiKey: '',
     secretKey: '',
     passphrase: '',
-    isPaperTrading: true,
+    openrouterApiKey: '',
+    isPaperTrading: false, // Default to Live if configured, or user toggleable
+    autoPilotEnabled: true, // FULL BOT AUTO-PILOT ON BY DEFAULT
+    tranchePercent: 20,     // 20% of available cash per tranche
     takeProfitPercent: 3.5,
     cutLossPercent: 5.0,
     maxTranches: 4,
@@ -241,6 +247,58 @@ export async function fetchBatchRealRsi(symbols: string[]): Promise<Record<strin
     );
   }
   return map;
+}
+
+// OpenRouter AI Agent Integration via Cloudflare Pages Function
+export interface AIAgentDecision {
+  action: 'BUY_SPOT' | 'HOLD';
+  confidence: number;
+  reason: string;
+  modelUsed: string;
+  symbol: string;
+  price: number;
+}
+
+export async function consultOpenRouterAgent(
+  candidate: {
+    symbol: string;
+    currentPrice: number;
+    change24h: number;
+    rsi15m: number;
+    aiScore: number;
+    recentCandles?: any[];
+  },
+  config?: BitgetConfig
+): Promise<AIAgentDecision | null> {
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (config?.openrouterApiKey) {
+      headers['x-openrouter-key'] = config.openrouterApiKey;
+    }
+    const res = await fetch('/api/agent', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(candidate),
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (json.code === '00000' && json.data) {
+      return json.data;
+    }
+    return null;
+  } catch (err) {
+    console.warn('consultOpenRouterAgent failed:', err);
+    return null;
+  }
+}
+
+// Calculate Tranche Budget based on available cash (Default 20% of cash, min $10 USDT)
+export function calculateTrancheBudget(availableUsdt: number, tranchePercent = 20): number {
+  if (availableUsdt <= 0) return 10;
+  const calculated = (availableUsdt * (tranchePercent || 20)) / 100;
+  return Math.max(10, parseFloat(calculated.toFixed(2)));
 }
 
 // Edge Bot Integration

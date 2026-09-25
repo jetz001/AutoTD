@@ -199,6 +199,29 @@ export function BitgetSettingsModal({ isOpen, onClose, onSave }: Props) {
             </div>
           </div>
 
+          {/* OpenRouter AI Agent Credentials */}
+          <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 font-semibold text-foreground text-xs">
+                <Sliders className="h-3.5 w-3.5 text-purple-400" />
+                <span>OpenRouter AI Agent (วิเคราะห์ตัดสินใจ)</span>
+              </div>
+              <span className="text-[10px] text-muted-foreground">ระบบ 6 โมเดลฟรี Auto-Fallback</span>
+            </div>
+            <div>
+              <label className="text-[11px] text-muted-foreground">
+                OpenRouter API Key (เว้นว่างไว้เพื่อใช้คีย์จาก Cloudflare Secrets)
+              </label>
+              <Input
+                type="password"
+                placeholder="sk-or-v1-... (หรือดึงจาก Pages Secret อัตโนมัติ)"
+                value={cfg.openrouterApiKey || ""}
+                onChange={(e) => setCfg({ ...cfg, openrouterApiKey: e.target.value.trim() })}
+                className="mt-1 h-8 text-xs font-mono"
+              />
+            </div>
+          </div>
+
           {/* Cloudflare Pages Deployment Info */}
           <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 space-y-2">
             <div className="flex items-center justify-between">
@@ -293,6 +316,45 @@ export function BitgetSettingsModal({ isOpen, onClose, onSave }: Props) {
                   <span className="text-muted-foreground">%</span>
                 </div>
               </div>
+
+              <div>
+                <label className="text-[11px] text-muted-foreground">
+                  ขนาดเงินต่อไม้ (% ของเงินสด)
+                </label>
+                <div className="mt-1 flex items-center gap-1">
+                  <Input
+                    type="number"
+                    min="5"
+                    max="50"
+                    value={cfg.tranchePercent || 20}
+                    onChange={(e) =>
+                      setCfg({ ...cfg, tranchePercent: parseInt(e.target.value) || 20 })
+                    }
+                    className="h-8 text-xs font-semibold text-cyan-400"
+                  />
+                  <span className="text-muted-foreground">%</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Auto-Pilot Full Bot Switch */}
+            <div className="flex items-center justify-between rounded border border-cyan-500/30 p-2.5 bg-cyan-500/10 mt-2">
+              <div>
+                <div className="font-semibold text-xs text-cyan-400">
+                  ⚡ FULL BOT AUTO-PILOT (เข้าซื้อ & ขายอัตโนมัติเต็มระบบ)
+                </div>
+                <div className="text-[10px] text-muted-foreground">
+                  เมื่อเปิด: บอทจะคัดเหรียญ ส่ง AI คอนเฟิร์ม ซื้อไม้ 1, ซื้อ DCA, ขายทำกำไร, และคัทลอสโดยไม่ต้องกดเอง
+                </div>
+              </div>
+              <Button
+                variant={cfg.autoPilotEnabled ? "default" : "outline"}
+                size="sm"
+                onClick={() => setCfg({ ...cfg, autoPilotEnabled: !cfg.autoPilotEnabled })}
+                className={`font-bold h-7 text-xs ${cfg.autoPilotEnabled ? "bg-cyan-500 hover:bg-cyan-600 text-black" : ""}`}
+              >
+                {cfg.autoPilotEnabled ? "เปิดใช้งาน" : "ปิด"}
+              </Button>
             </div>
 
             {/* Auto Rebalance Toggle */}
