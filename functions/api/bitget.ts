@@ -32,21 +32,31 @@ async function generateSignature(
   return btoa(binary);
 }
 
-function getCredentials(request: Request, env: Env, bodyJson?: any) {
+function getCredentials(request: Request, env: any, bodyJson?: any) {
   const apiKey =
     request.headers.get("x-bitget-key") ||
     bodyJson?.apiKey ||
-    env.BITGET_API_KEY ||
+    env?.BITGET_API_KEY ||
+    env?.BITGET_KEY ||
+    env?.BG_API_KEY ||
+    env?.BG_KEY ||
     "";
   const secretKey =
     request.headers.get("x-bitget-secret") ||
     bodyJson?.secretKey ||
-    env.BITGET_SECRET_KEY ||
+    env?.BITGET_SECRET_KEY ||
+    env?.BITGET_SECRET ||
+    env?.BG_SECRET_KEY ||
+    env?.BG_SECRET ||
     "";
   const passphrase =
     request.headers.get("x-bitget-passphrase") ||
     bodyJson?.passphrase ||
-    env.BITGET_PASSPHRASE ||
+    env?.BITGET_PASSPHRASE ||
+    env?.BITGET_PASS ||
+    env?.BITGET_PASSWORD ||
+    env?.BG_PASSPHRASE ||
+    env?.BG_PASS ||
     "";
   return { apiKey, secretKey, passphrase };
 }
