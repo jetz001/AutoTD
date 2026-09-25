@@ -210,26 +210,42 @@ async function executeTradingCycle(triggerSource: string, env: Env, configOverri
   let orderResult = null;
   if (!isPaper && hasBitgetKeys && bitgetClient && decision.action !== "HOLD") {
     try {
-      if (decision.action === "OPEN_LONG") {
-        orderResult = await bitgetClient.placeFuturesOrder({
-          symbol: decision.symbol,
-          side: "buy",
-          orderType: "market",
-          size: "0.01", // Size ตาม risk management
-          presetStopLossPrice: decision.stopLossPrice?.toString(),
-          presetTakeProfitPrice: decision.takeProfitPrice?.toString(),
-        });
-      } else if (decision.action === "OPEN_SHORT") {
-        orderResult = await bitgetClient.placeFuturesOrder({
-          symbol: decision.symbol,
-          side: "sell",
-          orderType: "market",
-          size: "0.01",
-          presetStopLossPrice: decision.stopLossPrice?.toString(),
-          presetTakeProfitPrice: decision.takeProfitPrice?.toString(),
-        });
-      } else if (decision.action === "CLOSE_POSITION") {
-        orderResult = await bitgetClient.closeAllPositions();
+      if (decision.action === "BUY_SPOT" || decision.action === "OPEN_LONG") {
+        if (tradingMode === "SPOT") {
+          orderResult = await bitgetClient.placeSpotOrder({
+            symbol: decision.symbol,
+            side: "buy",
+            orderType: "market",
+            size: "10",
+          });
+        } else {
+          orderResult = await bitgetClient.placeFuturesOrder({
+            symbol: decision.symbol,
+            side: "buy",
+            orderType: "market",
+            size: "0.01",
+            presetStopLossPrice: decision.stopLossPrice?.toString(),
+            presetTakeProfitPrice: decision.takeProfitPrice?.toString(),
+          });
+        }
+      } else if (decision.action === "SELL_SPOT" || decision.action === "CLOSE_POSITION" || decision.action === "OPEN_SHORT") {
+        if (tradingMode === "SPOT") {
+          orderResult = await bitgetClient.placeSpotOrder({
+            symbol: decision.symbol,
+            side: "sell",
+            orderType: "market",
+            size: "10",
+          });
+        } else {
+          orderResult = await bitgetClient.placeFuturesOrder({
+            symbol: decision.symbol,
+            side: "sell",
+            orderType: "market",
+            size: "0.01",
+            presetStopLossPrice: decision.stopLossPrice?.toString(),
+            presetTakeProfitPrice: decision.takeProfitPrice?.toString(),
+          });
+        }
       }
     } catch (err: any) {
       console.error("Order execution failed:", err.message);
