@@ -26,6 +26,7 @@ import {
   triggerEdgeBotWake,
   consultOpenRouterAgent,
   calculateTrancheBudget,
+  syncBitgetConfigFromCloudflare,
   EDGE_BOT_URL,
   type BitgetConfig,
   type SpotHolding,
@@ -70,6 +71,22 @@ export function CryptoPageClient() {
     cashReserveUsdt: getPaperBalance(),
     recentLogs: loadQuantLogs(),
   })
+
+  // Auto-sync Bitget credentials from Cloudflare Pages Secrets if missing in localStorage
+  React.useEffect(() => {
+    syncBitgetConfigFromCloudflare().then((synced) => {
+      if (synced && synced.apiKey) {
+        setConfig((prev) => {
+          if (!prev.apiKey || !prev.secretKey) {
+            const merged = { ...prev, ...synced }
+            saveBitgetConfig(merged)
+            return merged
+          }
+          return prev
+        })
+      }
+    })
+  }, [])
 
   // Price map of symbols
   const priceMap = React.useMemo(() => {

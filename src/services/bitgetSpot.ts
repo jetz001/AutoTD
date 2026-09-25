@@ -327,7 +327,51 @@ export async function triggerEdgeBotWake(reason = 'MANUAL_TRIGGER_FROM_DASHBOARD
   }
 }
 
-// Real Bitget API Communication
+// Cloudflare Pages Secret Sync
+export async function syncBitgetConfigFromCloudflare(): Promise<Partial<BitgetConfig> | null> {
+  try {
+    const res = await fetch('/api/bitget?action=sync-config');
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (json.code === '00000' && json.data?.hasCredentials) {
+      return {
+        apiKey: json.data.apiKey,
+        secretKey: json.data.secretKey,
+        passphrase: json.data.passphrase,
+      };
+    }
+  } catch {}
+  return null;
+}
+
+// Native Browser & Edge Web Crypto HMAC-SHA256 Signer for Bitget API
+export async function signBitgetRequest(
+  timestamp: string,
+  method: string,
+  requestPath: string,
+  queryString: string,
+  body: string,
+  secretKey: string
+): Promise<string> {
+  const message = timestamp + method.toUpperCase() + requestPath + (queryString ? `?${queryString}` : '') + (body || '');
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secretKey),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(message));
+  const bytes = new Uint8Array(signature);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+// Real Bitget API Communication (Direct Browser WebCrypto with Pages Proxy Fallback)
 export async function executeRealBitgetOrder(
   order: {
     symbol: string;
@@ -338,6 +382,54 @@ export async function executeRealBitgetOrder(
   },
   config?: BitgetConfig
 ): Promise<{ success: boolean; data?: any; message: string }> {
+  // 1. First priority: Direct Browser WebCrypto request (Bypasses Cloudflare Worker WAF blocks)
+  if (config?.apiKey && config?.secretKey && config?.passphrase) {
+    try {
+      const timestamp = Date.now().toString();
+      const requestPath = '/api/v2/spot/trade/place-order';
+      const payload: any = {
+        symbol: order.symbol,
+        side: order.side,
+        orderType: order.orderType || 'market',
+        size: String(order.size),
+        clientOid: `td_${Date.now()}`,
+      };
+      if (order.price) payload.price = String(order.price);
+      const bodyStr = JSON.stringify(payload);
+      const sign = await signBitgetRequest(timestamp, 'POST', requestPath, '', bodyStr, config.secretKey);
+
+      const directRes = await fetch(`https://api.bitget.com${requestPath}`, {
+        method: 'POST',
+        headers: {
+          'ACCESS-KEY': config.apiKey,
+          'ACCESS-SIGN': sign,
+          'ACCESS-TIMESTAMP': timestamp,
+          'ACCESS-PASSPHRASE': config.passphrase,
+          'Content-Type': 'application/json',
+          locale: 'en-US',
+        },
+        body: bodyStr,
+      });
+
+      const directJson = await directRes.json();
+      if (directJson.code === '00000') {
+        return {
+          success: true,
+          data: directJson.data,
+          message: `✓ [Bitget Spot] ส่งคำสั่งสำเร็จ: orderId=${directJson.data?.orderId || 'ok'}`,
+        };
+      } else if (directJson.code) {
+        return {
+          success: false,
+          message: `Bitget API (${directJson.code}): ${directJson.msg || 'Order failed'}`,
+        };
+      }
+    } catch (directErr) {
+      console.warn('Direct Bitget call failed, falling back to Pages proxy:', directErr);
+    }
+  }
+
+  // 2. Fallback: Cloudflare Pages Proxy Endpoint
   try {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -375,6 +467,44 @@ export async function fetchRealBitgetAssets(config?: BitgetConfig): Promise<{
   usdtAvailable: number;
   assets: Array<{ coin: string; available: number; frozen: number }>;
 } | null> {
+  // 1. First priority: Direct Browser WebCrypto request
+  if (config?.apiKey && config?.secretKey && config?.passphrase) {
+    try {
+      const timestamp = Date.now().toString();
+      const requestPath = '/api/v2/spot/account/assets';
+      const sign = await signBitgetRequest(timestamp, 'GET', requestPath, '', '', config.secretKey);
+
+      const directRes = await fetch(`https://api.bitget.com${requestPath}`, {
+        headers: {
+          'ACCESS-KEY': config.apiKey,
+          'ACCESS-SIGN': sign,
+          'ACCESS-TIMESTAMP': timestamp,
+          'ACCESS-PASSPHRASE': config.passphrase,
+          'Content-Type': 'application/json',
+          locale: 'en-US',
+        },
+      });
+
+      const directJson = await directRes.json();
+      if (directJson.code === '00000' && Array.isArray(directJson.data)) {
+        let usdtAvailable = 0;
+        const assets: Array<{ coin: string; available: number; frozen: number }> = [];
+
+        for (const item of directJson.data) {
+          const coin = item.coin || '';
+          const avail = parseFloat(item.available || '0');
+          const frozen = parseFloat(item.frozen || '0');
+          if (coin === 'USDT') usdtAvailable = avail;
+          if (avail > 0 || frozen > 0) assets.push({ coin, available: avail, frozen });
+        }
+        return { usdtAvailable, assets };
+      }
+    } catch (err) {
+      console.warn('Direct assets fetch failed, falling back to proxy:', err);
+    }
+  }
+
+  // 2. Fallback: Cloudflare Pages Proxy Endpoint
   try {
     const headers: Record<string, string> = {};
     if (config?.apiKey) headers['x-bitget-key'] = config.apiKey;

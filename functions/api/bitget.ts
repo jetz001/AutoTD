@@ -78,6 +78,22 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   const action = url.searchParams.get("action") || "assets";
 
   if (request.method === "GET") {
+    if (action === "sync-config") {
+      const creds = getCredentials(request, env);
+      return Response.json(
+        {
+          code: "00000",
+          data: {
+            apiKey: creds.apiKey || "",
+            secretKey: creds.secretKey || "",
+            passphrase: creds.passphrase || "",
+            hasCredentials: Boolean(creds.apiKey && creds.secretKey && creds.passphrase),
+          },
+        },
+        { headers: corsHeaders }
+      );
+    }
+
     const { apiKey, secretKey, passphrase } = getCredentials(request, env);
     if (!apiKey || !secretKey || !passphrase) {
       return Response.json(
@@ -113,6 +129,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           "ACCESS-TIMESTAMP": timestamp,
           "ACCESS-PASSPHRASE": passphrase,
           "Content-Type": "application/json",
+          "Accept": "application/json",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           locale: "en-US",
         },
       });
@@ -174,6 +192,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           "ACCESS-TIMESTAMP": timestamp,
           "ACCESS-PASSPHRASE": passphrase,
           "Content-Type": "application/json",
+          "Accept": "application/json",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           locale: "en-US",
         },
         body: bodyStr,
