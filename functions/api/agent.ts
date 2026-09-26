@@ -6,14 +6,65 @@ interface Env {
   AI_API_KEY?: string;
 }
 
-const DEFAULT_FREE_MODELS = [
+export const DEFAULT_FREE_MODELS = [
   "inclusionai/ling-3.0-flash-fin:free",
-  "qwen/qwen3.8-27b:free",
-  "nvidia/nemotron-3.5-lightning:free",
-  "liquid/lfm-2.5-2.6b:free",
-  "thinkingmachines/inkling-small:free",
   "inclusionai/ling-3.0-flash-sante:free",
+  "qwen/qwen3.8-27b:free",
+  "dots-studio/dots-3-note-preview:free",
+  "liquid/lfm-2.5-2.6b:free",
+  "nvidia/nemotron-3.5-lightning:free",
+  "thinkingmachines/inkling-small:free",
+  "poolside/laguna-s-2.1:free",
 ];
+
+// In-memory cache for dynamic free models (refreshed every hour)
+let cachedFreeModels: string[] = [...DEFAULT_FREE_MODELS];
+let lastModelsFetchTime = 0;
+const CACHE_TTL_MS = 3600 * 1000; // 1 hour
+
+export async function getLiveFreeModels(apiKey?: string): Promise<string[]> {
+  const now = Date.now();
+  if (cachedFreeModels.length >= 3 && now - lastModelsFetchTime < CACHE_TTL_MS) {
+    return cachedFreeModels;
+  }
+
+  try {
+    const headers: Record<string, string> = {
+      "User-Agent": "AutoTD-QuantBot/1.0",
+    };
+    if (apiKey) {
+      headers["Authorization"] = `Bearer ${apiKey}`;
+    }
+
+    const res = await fetch("https://openrouter.ai/api/v1/models", { headers });
+    if (!res.ok) return cachedFreeModels;
+
+    const json = (await res.json()) as any;
+    if (!Array.isArray(json?.data)) return cachedFreeModels;
+
+    const freeModels = json.data
+      .filter((m: any) => {
+        if (!m?.id || !m.id.endsWith(":free")) return false;
+        const idLower = m.id.toLowerCase();
+        if (idLower.includes("safety") || idLower.includes("moderation") || idLower.includes("embed")) {
+          return false;
+        }
+        return true;
+      })
+      .sort((a: any, b: any) => (b.created || 0) - (a.created || 0))
+      .map((m: any) => m.id);
+
+    if (freeModels.length >= 3) {
+      cachedFreeModels = freeModels.slice(0, 8);
+      lastModelsFetchTime = now;
+      console.log(`[AutoTD] Dynamically discovered ${cachedFreeModels.length} active OpenRouter free models:`, cachedFreeModels);
+    }
+  } catch (err) {
+    console.warn("[AutoTD] Dynamic models fetch warning, using fallback cache:", err);
+  }
+
+  return cachedFreeModels;
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -38,12 +89,13 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       (env as any).OR_API_KEY ||
       (env as any).AGENT_KEY;
 
+    const liveModels = await getLiveFreeModels(aiKey);
     return Response.json(
       {
         status: "READY",
         hasKey: Boolean(aiKey),
         provider: "openrouter",
-        availableFreeModels: DEFAULT_FREE_MODELS,
+        availableFreeModels: liveModels,
       },
       { headers: corsHeaders }
     );
@@ -119,9 +171,10 @@ Respond ONLY with valid JSON in this exact structure:
 `;
 
   let lastError: any = null;
+  const modelsToTry = await getLiveFreeModels(aiKey);
 
-  for (let i = 0; i < DEFAULT_FREE_MODELS.length; i++) {
-    const model = DEFAULT_FREE_MODELS[i];
+  for (let i = 0; i < modelsToTry.length; i++) {
+    const model = modelsToTry[i];
     try {
       const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
@@ -133,6 +186,7 @@ Respond ONLY with valid JSON in this exact structure:
         },
         body: JSON.stringify({
           model,
+          models: modelsToTry.slice(i, i + 3),
           messages: [{ role: "user", content: prompt }],
           response_format: { type: "json_object" },
           temperature: 0.2,

@@ -198,26 +198,37 @@ Respond ONLY with a valid JSON object matching this schema:
 }
 
 export const DEFAULT_FREE_MODELS = [
-  "nex-agi/nex-n2.5-mini:free",
-  "nex-agi/nex-n2.5-pro:free",
   "inclusionai/ling-3.0-flash-fin:free",
+  "inclusionai/ling-3.0-flash-sante:free",
   "qwen/qwen3.8-27b:free",
+  "dots-studio/dots-3-note-preview:free",
   "liquid/lfm-2.5-2.6b:free",
-  "nvidia/nemotron-3.5-lightning:free"
+  "nvidia/nemotron-3.5-lightning:free",
+  "thinkingmachines/inkling-small:free",
+  "poolside/laguna-s-2.1:free",
 ];
 
-export async function fetchLatest6FreeModels(apiKey: string): Promise<string[]> {
+export async function fetchLatest6FreeModels(apiKey?: string): Promise<string[]> {
   try {
-    const res = await fetch("https://openrouter.ai/api/v1/models", {
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "User-Agent": "AutoTD-QuantBot/1.0"
-      }
-    });
+    const headers: Record<string, string> = {
+      "User-Agent": "AutoTD-QuantBot/1.0",
+    };
+    if (apiKey) {
+      headers["Authorization"] = `Bearer ${apiKey}`;
+    }
+
+    const res = await fetch("https://openrouter.ai/api/v1/models", { headers });
     if (!res.ok) return DEFAULT_FREE_MODELS;
-    const json = await res.json() as any;
+    const json = (await res.json()) as any;
     const free = (json.data || [])
-      .filter((m: any) => m.id && m.id.endsWith(":free"))
+      .filter((m: any) => {
+        if (!m?.id || !m.id.endsWith(":free")) return false;
+        const idLower = m.id.toLowerCase();
+        if (idLower.includes("safety") || idLower.includes("moderation") || idLower.includes("embed")) {
+          return false;
+        }
+        return true;
+      })
       .sort((a: any, b: any) => (b.created || 0) - (a.created || 0));
     const ids = free.slice(0, 6).map((m: any) => m.id);
     return ids.length >= 3 ? ids : DEFAULT_FREE_MODELS;
