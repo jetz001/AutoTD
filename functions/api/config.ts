@@ -125,9 +125,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     if (env.AUTOTD_KV) {
       try {
-        await env.AUTOTD_KV.put("user_config", JSON.stringify(merged));
+        const newStr = JSON.stringify(merged);
+        const oldStr = JSON.stringify(currentSaved);
+        if (newStr !== oldStr) {
+          await env.AUTOTD_KV.put("user_config", newStr);
+        }
       } catch (kvErr) {
-        console.warn("Failed to write to AUTOTD_KV:", kvErr);
+        console.warn("Failed to write to AUTOTD_KV (will rely on in-memory cache until reset):", kvErr);
       }
     }
 

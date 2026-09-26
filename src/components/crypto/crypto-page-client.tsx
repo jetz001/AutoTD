@@ -164,14 +164,15 @@ export function CryptoPageClient() {
         const evaluated = evaluateScreener(topTickers, currentHoldings, realRsiMap)
         setTickers(evaluated)
 
-        // 3. Update Holdings with Live Prices
+        // 3. Update Holdings with Live Prices (In-memory state only, do NOT trigger KV PUT)
         const pMap: Record<string, number> = {}
         for (const t of topTickers) {
           pMap[t.symbol] = t.lastPr
         }
         const updatedHoldings = updateHoldingsWithLivePrices(currentHoldings, pMap)
         setHoldings(updatedHoldings)
-        saveSpotHoldings(updatedHoldings)
+        // Note: Do NOT call saveSpotHoldings here to preserve Cloudflare KV quota.
+        // Holdings are saved only when a real BUY or SELL trade executes.
 
         // 4. Master Quant Check (Take Profit & Cut Loss & Candidate Auto-Buy)
         const { decision, overallState } = runQuantPortfolioCheck(updatedHoldings, config, evaluated)
