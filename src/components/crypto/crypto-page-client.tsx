@@ -8,6 +8,7 @@ import { QuantExecutiveBriefing } from "./QuantExecutiveBriefing"
 import { SpotScreenerCard } from "./SpotScreenerCard"
 import { SpotHoldingsAvgCostCard } from "./SpotHoldingsAvgCostCard"
 import { RealTradingChart } from "./RealTradingChart"
+import { OrderHistoryCard } from "./OrderHistoryCard"
 import {
   loadBitgetConfig,
   saveBitgetConfig,
@@ -702,6 +703,12 @@ export function CryptoPageClient() {
         symbol={selectedSymbol}
         currentPrice={selectedPrice}
         holding={selectedHolding}
+      />
+
+      {/* 4. Transaction & Order History: Live Bitget Orders & Quant AI Decision Logs */}
+      <OrderHistoryCard
+        config={config}
+        quantLogs={quantState.recentLogs}
       />
 
       {/* Settings Modal */}

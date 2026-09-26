@@ -36,6 +36,9 @@ export async function GET(req: NextRequest) {
     if (action === "orders") {
       const symbol = searchParams.get("symbol") || "";
       requestPath = `/api/v2/spot/trade/unfilled-orders${symbol ? `?symbol=${symbol}` : ""}`;
+    } else if (action === "history") {
+      const symbol = searchParams.get("symbol") || "";
+      requestPath = `/api/v2/spot/trade/history-orders${symbol ? `?symbol=${symbol}` : ""}`;
     }
 
     const timestamp = Date.now().toString();

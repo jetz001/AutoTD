@@ -586,6 +586,91 @@ export async function fetchRealBitgetAssets(config?: BitgetConfig): Promise<{
   }
 }
 
+export interface BitgetHistoryOrder {
+  orderId: string;
+  clientOid?: string;
+  symbol: string;
+  side: 'buy' | 'sell';
+  orderType: string;
+  priceAvg?: string;
+  price?: string;
+  size: string;
+  baseVolume?: string;
+  quoteVolume?: string;
+  status: 'init' | 'new' | 'partially_filled' | 'filled' | 'cancelled';
+  cTime: string | number;
+  uTime?: string | number;
+}
+
+export async function fetchRealBitgetOrderHistory(
+  config?: BitgetConfig,
+  symbol?: string
+): Promise<BitgetHistoryOrder[]> {
+  let activeConfig = config;
+  if (!activeConfig?.apiKey || !activeConfig?.secretKey) {
+    const synced = await syncBitgetConfigFromCloudflare();
+    if (synced && synced.apiKey) {
+      activeConfig = { ...(config || loadBitgetConfig()), ...synced };
+      saveBitgetConfig(activeConfig as BitgetConfig);
+    }
+  }
+
+  const queryParams = symbol ? `symbol=${symbol}&limit=50` : 'limit=50';
+
+  // 1. Direct Browser WebCrypto request
+  if (activeConfig?.apiKey && activeConfig?.secretKey && activeConfig?.passphrase) {
+    try {
+      const timestamp = Date.now().toString();
+      const requestPath = '/api/v2/spot/trade/history-orders';
+      const sign = await signBitgetRequest(
+        timestamp,
+        'GET',
+        requestPath,
+        queryParams,
+        '',
+        activeConfig.secretKey
+      );
+
+      const directRes = await fetch(`https://api.bitget.com${requestPath}?${queryParams}`, {
+        headers: {
+          'ACCESS-KEY': activeConfig.apiKey,
+          'ACCESS-SIGN': sign,
+          'ACCESS-TIMESTAMP': timestamp,
+          'ACCESS-PASSPHRASE': activeConfig.passphrase,
+          'Content-Type': 'application/json',
+          locale: 'en-US',
+        },
+      });
+
+      const directJson = await directRes.json();
+      if (directJson.code === '00000' && Array.isArray(directJson.data)) {
+        return directJson.data;
+      }
+    } catch (err) {
+      console.warn('Direct order history fetch failed, falling back to proxy:', err);
+    }
+  }
+
+  // 2. Fallback: Cloudflare Pages / Next.js Proxy Endpoint
+  try {
+    const headers: Record<string, string> = {};
+    if (activeConfig?.apiKey) headers['x-bitget-key'] = activeConfig.apiKey;
+    if (activeConfig?.secretKey) headers['x-bitget-secret'] = activeConfig.secretKey;
+    if (activeConfig?.passphrase) headers['x-bitget-passphrase'] = activeConfig.passphrase;
+
+    const proxyUrl = `/api/bitget?action=history${symbol ? `&symbol=${symbol}` : ''}`;
+    const res = await fetch(proxyUrl, { headers });
+    if (!res.ok) return [];
+    const json = await res.json();
+    if (json.code === '00000' && Array.isArray(json.data)) {
+      return json.data;
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
 // Load Spot Holdings
 export function loadSpotHoldings(): SpotHolding[] {
   if (typeof window === 'undefined') return [];
