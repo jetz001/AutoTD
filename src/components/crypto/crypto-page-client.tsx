@@ -176,6 +176,8 @@ export function CryptoPageClient() {
           const realAcc = await fetchRealBitgetAssets(config)
           if (realAcc) {
             overallState.cashReserveUsdt = realAcc.usdtAvailable
+          } else {
+            overallState.cashReserveUsdt = 0
           }
         }
 
@@ -240,22 +242,30 @@ export function CryptoPageClient() {
             }
             // 5.3 AUTO-BUY: DCA TRANCHE or NEW TRANCHE 1 (Hybrid Quant + OpenRouter AI)
             else if (decision.action === "BUY_TRANCHE") {
-              const availableCash = overallState.cashReserveUsdt
+              let availableCash = overallState.cashReserveUsdt
 
-              // Guard: In Live mode, verify that real USDT balance is >= 5 USDT
-              if (!config.isPaperTrading && availableCash < 5) {
-                const newLog = {
-                  id: Date.now().toString(),
-                  time: new Date().toLocaleTimeString(),
-                  action: "⚠️ [INSUFFICIENT USDT]",
-                  symbol: decision.symbol,
-                  note: `ยอด USDT ในกระเป๋า Spot มี $${availableCash.toFixed(2)} (ต้องการขั้นต่ำ $10 เพื่อเปิดไม้) กรุณาโอน USDT เข้ากระเป๋า Spot ของ Bitget`,
-                  color: "#f59e0b",
+              // Strict Live Guard: In Live mode, verify real Bitget USDT balance
+              if (!config.isPaperTrading) {
+                const freshAcc = await fetchRealBitgetAssets(config)
+                availableCash = freshAcc ? freshAcc.usdtAvailable : 0
+                overallState.cashReserveUsdt = availableCash
+
+                if (availableCash < 5) {
+                  const newLog = {
+                    id: Date.now().toString(),
+                    time: new Date().toLocaleTimeString(),
+                    action: "⚠️ [INSUFFICIENT USDT]",
+                    symbol: decision.symbol,
+                    note: availableCash === 0
+                      ? `ไม่สามารถตรวจสอบยอดเงินสดจริงจาก Bitget ได้ หรือกระเป๋า Spot มียอด $0.00 ระบบยกเลิกการเปิดไม้ Live เพื่อความปลอดภัย`
+                      : `ยอด USDT ในกระเป๋า Spot มี $${availableCash.toFixed(2)} (ต้องการขั้นต่ำ $10 เพื่อเปิดไม้) กรุณาโอน USDT เข้ากระเป๋า Spot ของ Bitget`,
+                    color: "#f59e0b",
+                  }
+                  saveQuantLogs([newLog, ...loadQuantLogs()])
+                  setActionAlert(`⚠️ [LIVE GUARD] ยอด USDT ใน Bitget Spot มี $${availableCash.toFixed(2)} (ไม่พอซื้อขั้นต่ำ $10) ยกเลิกการเปิดไม้`)
+                  setTimeout(() => setActionAlert(null), 6000)
+                  return
                 }
-                saveQuantLogs([newLog, ...loadQuantLogs()])
-                setActionAlert(`⚠️ ยอด USDT ใน Bitget Spot มี $${availableCash.toFixed(2)} (ไม่พอซื้อขั้นต่ำ $10) กรุณาโอน USDT เข้ากระเป๋า Spot`)
-                setTimeout(() => setActionAlert(null), 6000)
-                return
               }
 
               const isExisting = updatedHoldings.some((h) => h.symbol === decision.symbol)

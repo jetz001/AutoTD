@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
+  Trash2,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -135,6 +136,15 @@ export function OrderHistoryCard({ config, quantLogs }: Props) {
     URL.revokeObjectURL(url)
   }
 
+  function handleClearLogs() {
+    if (typeof window !== "undefined") {
+      if (confirm("ต้องการล้างประวัติบันทึกการตัดสินใจทั้งหมดใช่หรือไม่?")) {
+        localStorage.removeItem("bitget_quant_logs_v1")
+        window.location.reload()
+      }
+    }
+  }
+
   return (
     <Card className="col-span-12 overflow-hidden border-border/60 shadow-sm">
       <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3">
@@ -184,6 +194,19 @@ export function OrderHistoryCard({ config, quantLogs }: Props) {
             <Download className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">ส่งออก CSV</span>
           </Button>
+
+          {activeTab === "quant" && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleClearLogs}
+              className="h-8 text-xs gap-1.5 text-rose-500 hover:text-rose-600 hover:bg-rose-500/10 border-rose-500/20"
+              title="ล้างประวัติบันทึก Quant AI เก่าทั้งหมด"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">ล้างประวัติ</span>
+            </Button>
+          )}
         </div>
       </CardHeader>
 
