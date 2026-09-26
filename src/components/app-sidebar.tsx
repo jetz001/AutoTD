@@ -36,8 +36,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" render={<Link href="/crypto" />}>
-              <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                <Bot className="size-5" />
+              <div className="flex aspect-square size-8 items-center justify-center rounded-lg overflow-hidden border border-cyan-500/30 bg-black/40 shadow-sm shadow-cyan-500/20">
+                <img src="/logo.png" alt="AutoTD" className="size-full object-cover" />
               </div>
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-bold tracking-tight text-foreground flex items-center gap-1.5">

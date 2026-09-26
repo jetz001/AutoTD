@@ -1,11 +1,54 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
-  <rect width="32" height="32" rx="8" fill="#0a0a0a"/>
-  <g transform="translate(4,4)" stroke="#fafafa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none">
-    <path d="M10 18v-7"/>
-    <path d="M11.12 2.198a2 2 0 0 1 1.76.006l7.866 3.847c.476.233.31.949-.22.949H3.474c-.53 0-.695-.716-.22-.949z"/>
-    <path d="M14 18v-7"/>
-    <path d="M18 18v-7"/>
-    <path d="M3 22h18"/>
-    <path d="M6 18v-7"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0b1329"/>
+      <stop offset="100%" stop-color="#050811"/>
+    </linearGradient>
+    <linearGradient id="cyanGreen" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#00f2fe"/>
+      <stop offset="100%" stop-color="#4facfe"/>
+    </linearGradient>
+    <linearGradient id="emeraldGrad" x1="0" y1="0" x2="0" y2="100" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+    <filter id="neonGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Rounded App Tile -->
+  <rect width="100" height="100" rx="22" fill="url(#bgGrad)"/>
+  <rect width="100" height="100" rx="22" stroke="#00f2fe" stroke-width="1.5" stroke-opacity="0.3"/>
+
+  <!-- Candlesticks in Background -->
+  <g opacity="0.45">
+    <!-- Candle 1 -->
+    <line x1="72" y1="20" x2="72" y2="48" stroke="#10b981" stroke-width="1.5" stroke-linecap="round"/>
+    <rect x="69" y="26" width="6" height="14" rx="1.5" fill="#10b981"/>
+
+    <!-- Candle 2 -->
+    <line x1="82" y1="14" x2="82" y2="42" stroke="#00f2fe" stroke-width="1.5" stroke-linecap="round"/>
+    <rect x="79" y="20" width="6" height="16" rx="1.5" fill="#00f2fe"/>
   </g>
+
+  <!-- Stylized Geometric A & T Icon with Glow -->
+  <g filter="url(#neonGlow)">
+    <!-- Outer Triangle 'A' Frame -->
+    <path d="M50 16 L22 74 L34 74 L50 40 L66 74 L78 74 Z" fill="none" stroke="url(#cyanGreen)" stroke-width="4.5" stroke-linejoin="round" stroke-linecap="round"/>
+    
+    <!-- Inner Crossbar 'T' Structure -->
+    <path d="M30 46 L70 46" stroke="#00f2fe" stroke-width="5" stroke-linecap="round"/>
+    <path d="M50 46 L50 82" stroke="url(#emeraldGrad)" stroke-width="5.5" stroke-linecap="round"/>
+  </g>
+
+  <!-- Tech Nodes / Quant Circuit Dots -->
+  <circle cx="50" cy="82" r="3" fill="#10b981"/>
+  <circle cx="30" cy="46" r="2.5" fill="#00f2fe"/>
+  <circle cx="70" cy="46" r="2.5" fill="#00f2fe"/>
+  <circle cx="50" cy="16" r="2.5" fill="#4facfe"/>
 </svg>

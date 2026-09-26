@@ -71,8 +71,12 @@ export class BitgetClient {
       body: method !== "GET" ? bodyStr : undefined,
     });
 
-    const data = await response.json();
-    return data;
+    const text = await response.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { code: "HTTP_" + response.status, msg: text.slice(0, 300) };
+    }
   }
 
   // --- ข้อมูลตลาด Spot (Market Data - Public) ---

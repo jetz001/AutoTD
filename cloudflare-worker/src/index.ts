@@ -88,7 +88,7 @@ export default {
     // API: ดูสถานะปัจจุบัน & ประวัติการตัดสินใจของ AI
     if (url.pathname === "/api/status") {
       const bitgetConfigured = Boolean(env.BITGET_API_KEY && env.BITGET_SECRET_KEY);
-      const aiConfigured = Boolean(env.AI_API_KEY);
+      const aiConfigured = Boolean(env.OPENROUTER_API_KEY || env.AI_API_KEY);
       return Response.json({
         status: "RUNNING",
         mode: env.TRADING_MODE || "SPOT",
@@ -245,23 +245,25 @@ export default {
     if (url.pathname === "/api/debug/bitget") {
       const results: any = {};
       
-      // Test Coinbase
+      // Test Bitget Public
       try {
-        const r1 = await fetch("https://api.coinbase.com/v2/prices/BTC-USD/spot");
-        results.coinbase = { status: r1.status, body: (await r1.text()).slice(0, 150) };
-      } catch (e: any) { results.coinbase = { error: e.message }; }
+        const r0 = await fetch("https://api.bitget.com/api/v2/spot/market/tickers?symbol=BTCUSDT", {
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
+        });
+        results.bitget_public = { status: r0.status, headers: Object.fromEntries(r0.headers.entries()), body: (await r0.text()).slice(0, 300) };
+      } catch (e: any) { results.bitget_public = { error: e.message }; }
 
-      // Test CoinCap
-      try {
-        const r2 = await fetch("https://api.coincap.io/v2/assets/bitcoin");
-        results.coincap = { status: r2.status, body: (await r2.text()).slice(0, 150) };
-      } catch (e: any) { results.coincap = { error: e.message }; }
-
-      // Test CryptoCompare
-      try {
-        const r3 = await fetch("https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD");
-        results.cryptocompare = { status: r3.status, body: (await r3.text()).slice(0, 150) };
-      } catch (e: any) { results.cryptocompare = { error: e.message }; }
+      // Test Bitget Private (if keys exist)
+      if (env.BITGET_API_KEY && env.BITGET_SECRET_KEY && env.BITGET_PASSPHRASE) {
+        try {
+          const client = new BitgetClient({
+            apiKey: env.BITGET_API_KEY,
+            secretKey: env.BITGET_SECRET_KEY,
+            passphrase: env.BITGET_PASSPHRASE,
+          });
+          results.bitget_private = await client.getSpotAccount();
+        } catch (e: any) { results.bitget_private = { error: e.message }; }
+      }
 
       return Response.json(results, { headers: corsHeaders });
     }
