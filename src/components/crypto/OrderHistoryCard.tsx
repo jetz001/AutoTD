@@ -140,7 +140,13 @@ export function OrderHistoryCard({ config, quantLogs }: Props) {
     if (typeof window !== "undefined") {
       if (confirm("ต้องการล้างประวัติบันทึกการตัดสินใจทั้งหมดใช่หรือไม่?")) {
         localStorage.removeItem("bitget_quant_logs_v1")
-        window.location.reload()
+        fetch("/api/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ quantLogs: [] }),
+        }).finally(() => {
+          window.location.reload()
+        })
       }
     }
   }

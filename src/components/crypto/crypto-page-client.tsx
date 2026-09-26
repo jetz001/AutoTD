@@ -121,11 +121,16 @@ export function CryptoPageClient() {
           setPaperBalance(getPaperBalance())
         }
 
-        if (Array.isArray(synced.quantLogs) && synced.quantLogs.length > 0) {
-          const localLogs = loadQuantLogs()
-          if (localLogs.length <= 1) {
-            saveQuantLogs(synced.quantLogs)
-            setQuantState((prev) => ({ ...prev, recentLogs: synced.quantLogs! }))
+        if (Array.isArray(synced.quantLogs)) {
+          if (synced.quantLogs.length === 0) {
+            localStorage.removeItem("bitget_quant_logs_v1")
+            setQuantState((prev) => ({ ...prev, recentLogs: [] }))
+          } else {
+            const localLogs = loadQuantLogs()
+            if (localLogs.length <= 1) {
+              saveQuantLogs(synced.quantLogs)
+              setQuantState((prev) => ({ ...prev, recentLogs: synced.quantLogs }))
+            }
           }
         }
       }
