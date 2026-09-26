@@ -159,13 +159,26 @@ export function RealTradingChart({ symbol, currentPrice, holding }: Props) {
     return () => clearInterval(interval)
   }, [loadCandles, viewMode])
 
+  // Price line refs to avoid duplicating lines on every re-render
+  const priceLinesRef = React.useRef<any[]>([])
+
   // Draw Price Lines: Avg Cost (Blue), Take Profit (Green), Cut Loss (Red)
   React.useEffect(() => {
-    if (!candleSeriesRef.current || !holding || viewMode !== "canvas") return
+    if (!candleSeriesRef.current || viewMode !== "canvas") return
+
+    // Clean up previous price lines
+    priceLinesRef.current.forEach((pl) => {
+      try {
+        candleSeriesRef.current?.removePriceLine(pl)
+      } catch {}
+    })
+    priceLinesRef.current = []
+
+    if (!holding) return
 
     try {
       // 1. Avg Cost Line (Blue dashed)
-      candleSeriesRef.current.createPriceLine({
+      const avgLine = candleSeriesRef.current.createPriceLine({
         price: holding.avgCostPrice,
         color: "#38bdf8",
         lineWidth: 2,
@@ -173,10 +186,11 @@ export function RealTradingChart({ symbol, currentPrice, holding }: Props) {
         axisLabelVisible: true,
         title: `ต้นทุนเฉลี่ย: $${holding.avgCostPrice}`,
       })
+      if (avgLine) priceLinesRef.current.push(avgLine)
 
       // 2. Take Profit Line (Green dotted)
       if (holding.takeProfitPrice) {
-        candleSeriesRef.current.createPriceLine({
+        const tpLine = candleSeriesRef.current.createPriceLine({
           price: holding.takeProfitPrice,
           color: "#10b981",
           lineWidth: 1,
@@ -184,11 +198,12 @@ export function RealTradingChart({ symbol, currentPrice, holding }: Props) {
           axisLabelVisible: true,
           title: `เป้าขาย TP: $${holding.takeProfitPrice}`,
         })
+        if (tpLine) priceLinesRef.current.push(tpLine)
       }
 
       // 3. Cut Loss Line (Red dotted)
       if (holding.cutLossPrice) {
-        candleSeriesRef.current.createPriceLine({
+        const slLine = candleSeriesRef.current.createPriceLine({
           price: holding.cutLossPrice,
           color: "#ef4444",
           lineWidth: 1,
@@ -196,11 +211,21 @@ export function RealTradingChart({ symbol, currentPrice, holding }: Props) {
           axisLabelVisible: true,
           title: `จุดคัท SL: $${holding.cutLossPrice}`,
         })
+        if (slLine) priceLinesRef.current.push(slLine)
       }
     } catch (e) {
       console.warn("Price lines error:", e)
     }
-  }, [holding, viewMode])
+
+    return () => {
+      priceLinesRef.current.forEach((pl) => {
+        try {
+          candleSeriesRef.current?.removePriceLine(pl)
+        } catch {}
+      })
+      priceLinesRef.current = []
+    }
+  }, [holding?.avgCostPrice, holding?.takeProfitPrice, holding?.cutLossPrice, viewMode])
 
   return (
     <Card className="col-span-12 flex flex-col h-[460px]">
