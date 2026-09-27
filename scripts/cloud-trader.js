@@ -20,7 +20,7 @@ function signBitgetRequest(timestamp, method, requestPath, queryString, bodyStr,
 
 function getCoinPrecision(symbol) {
   if (symbol.includes('BTC')) return 6;
-  if (symbol.includes('ETH') || symbol.includes('SOL')) return 4;
+  if (symbol.includes('ETH') || symbol.includes('SOL') || symbol.includes('TAO')) return 4;
   if (symbol.includes('BGB')) return 4;
   if (symbol.includes('MOODENG') || symbol.includes('NS')) return 2;
   return 2;
@@ -384,7 +384,7 @@ async function runAutopilotCycle() {
   if (ACTION_INPUT === 'cycle' && usdtAvailable >= 10 && holdings.length < (config.maxCoins || 4)) {
     console.log(`Cash available ($${usdtAvailable.toFixed(2)}) & slots open (${holdings.length}/${config.maxCoins || 4}). Scanning candidates...`);
     const STABLECOINS = ['USDC', 'USDGO', 'FDUSD', 'USDE', 'DAI', 'TUSD', 'EUR', 'BUSD'];
-    const REAL_R_CRYPTO = ['RENDERUSDT', 'ROSEUSDT', 'RUNEUSDT', 'RONUSDT', 'RAYUSDT', 'REQUSDT'];
+    const REAL_R_CRYPTO = ['RENDERUSDT', 'ROSEUSDT', 'RUNEUSDT', 'RAYUSDT', 'REQUSDT'];
     const heldSymbols = new Set(holdings.map(h => h.symbol));
 
     const candidates = tickersJson.data

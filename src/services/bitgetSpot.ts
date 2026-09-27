@@ -153,7 +153,7 @@ export async function fetchTopBitgetSpotTickers(): Promise<SpotTickerItem[]> {
     if (json.code !== '00000' || !Array.isArray(json.data)) return [];
 
     const STABLECOINS = ['USDC', 'USDGO', 'FDUSD', 'USDE', 'DAI', 'TUSD', 'EUR', 'BUSD'];
-    const REAL_R_CRYPTO = ['RENDERUSDT', 'ROSEUSDT', 'RUNEUSDT', 'RONUSDT', 'RAYUSDT', 'REQUSDT'];
+    const REAL_R_CRYPTO = ['RENDERUSDT', 'ROSEUSDT', 'RUNEUSDT', 'RAYUSDT', 'REQUSDT'];
 
     const usdtPairs = json.data
       .filter((item: any) => {
@@ -1080,6 +1080,9 @@ export async function executeSpotBuyTranche(
       setPaperBalance(Math.max(0, curBal - usdtAmount));
     }
 
+    // Set 12-minute cooldown to prevent rapid loop buying
+    setCooldown(symbol, 0.2);
+
     const modeTag = config.isPaperTrading ? '[PAPER]' : '🔥[REAL BITGET]';
     return {
       success: true,
@@ -1091,7 +1094,7 @@ export async function executeSpotBuyTranche(
 
 export function getCoinPrecision(symbol: string): number {
   if (symbol.includes('BTC')) return 6;
-  if (symbol.includes('ETH') || symbol.includes('SOL')) return 4;
+  if (symbol.includes('ETH') || symbol.includes('SOL') || symbol.includes('TAO')) return 4;
   if (symbol.includes('BGB')) return 4;
   if (symbol.includes('MOODENG') || symbol.includes('NS')) return 2;
   return 2;
