@@ -5,3 +5,8 @@ pages_build_output_dir = "out"
 [[kv_namespaces]]
 binding = "AUTOTD_KV"
 id = "bb8e501311f8491baf0827b635bd3ad8"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "autotd-db"
+database_id = "fb9b0c44-a7ba-4119-b1a5-eb056f756b3a"
