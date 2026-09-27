@@ -588,6 +588,58 @@ export async function fetchRealBitgetAssets(config?: BitgetConfig): Promise<{
   }
 }
 
+// Fetch and map genuine Bitget Spot wallet assets to SpotHolding objects with live valuation
+export async function fetchRealBitgetHoldings(
+  config?: BitgetConfig,
+  priceMap?: Record<string, number>
+): Promise<{
+  usdtAvailable: number;
+  totalUsdValue: number;
+  holdings: SpotHolding[];
+}> {
+  const assetsRes = await fetchRealBitgetAssets(config);
+  if (!assetsRes) {
+    return { usdtAvailable: 0, totalUsdValue: 0, holdings: [] };
+  }
+
+  const { usdtAvailable, assets } = assetsRes;
+  let totalUsd = usdtAvailable;
+  const realHoldings: SpotHolding[] = [];
+
+  for (const a of assets) {
+    if (a.coin === 'USDT') continue;
+    const sym = `${a.coin}USDT`;
+    const price = priceMap?.[sym] || 0;
+    const val = a.available * price;
+    totalUsd += val;
+
+    // Include real assets with value >= $0.10 USD
+    if (val >= 0.10) {
+      realHoldings.push({
+        symbol: sym,
+        baseCoin: a.coin,
+        totalAmount: a.available,
+        tranchesCount: 1,
+        avgCostPrice: price,
+        totalInvestedUsdt: val,
+        currentPrice: price,
+        unrealizedPnlUsdt: 0,
+        pnlPercent: 0,
+        takeProfitPrice: parseFloat((price * 1.05).toFixed(4)),
+        cutLossPrice: parseFloat((price * 0.95).toFixed(4)),
+        isPaper: false,
+        history: [{ price, amount: a.available, time: 'Bitget Spot' }],
+      });
+    }
+  }
+
+  return {
+    usdtAvailable,
+    totalUsdValue: totalUsd,
+    holdings: realHoldings,
+  };
+}
+
 export interface BitgetHistoryOrder {
   orderId: string;
   clientOid?: string;
@@ -683,7 +735,19 @@ export function loadSpotHoldings(isPaper = true): SpotHolding[] {
   }
   if (saved) {
     try {
-      return JSON.parse(saved);
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) {
+        if (!isPaper) {
+          // Strictly filter out paper-simulated mock holdings from Live mode
+          return parsed.filter(
+            (h: any) =>
+              h &&
+              h.isPaper !== true &&
+              !['ZECUSDT', 'XLMUSDT', 'ONDOUSDT'].includes(h.symbol)
+          );
+        }
+        return parsed;
+      }
     } catch {}
   }
   return [];
@@ -773,7 +837,7 @@ export async function executeSpotBuyTranche(
     };
 
     holdings[existingIdx] = updated;
-    saveSpotHoldings(holdings);
+    saveSpotHoldings(holdings, isPaper);
 
     if (config.isPaperTrading) {
       const curBal = getPaperBalance();
@@ -815,7 +879,7 @@ export async function executeSpotBuyTranche(
     };
 
     holdings.push(newHolding);
-    saveSpotHoldings(holdings);
+    saveSpotHoldings(holdings, isPaper);
 
     if (config.isPaperTrading) {
       const curBal = getPaperBalance();

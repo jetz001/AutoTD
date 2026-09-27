@@ -24,6 +24,7 @@ import {
   executeRebalanceRotation,
   fetchBatchRealRsi,
   fetchRealBitgetAssets,
+  fetchRealBitgetHoldings,
   fetchEdgeBotStatus,
   triggerEdgeBotWake,
   consultOpenRouterAgent,
@@ -175,6 +176,8 @@ export function CryptoPageClient() {
     if (newMode) {
       // Paper Mode
       const paperBal = getPaperBalance()
+      const modeHoldings = loadSpotHoldings(true)
+      setHoldings(modeHoldings)
       setQuantState((prev) => ({
         ...prev,
         cashReserveUsdt: paperBal,
@@ -183,32 +186,37 @@ export function CryptoPageClient() {
       }))
       setActionAlert("🛡️ สลับเป็นโหมดจำลอง (Paper Trading) แล้ว | บัญชีปลอดภัย ไม่เสียเงินจริง")
     } else {
-      // Live Mode
+      // Live Mode: Fetch genuine Bitget holdings and USDT
       setQuantState((prev) => ({
         ...prev,
         cashReserveUsdt: 0,
         recentLogs: modeLogs,
-        activeCoinsCount: modeHoldings.length,
+        activeCoinsCount: 0,
       }))
-      setActionAlert("🔥 สลับเป็นโหมดเทรดจริง (Live Bitget Spot) | กำลังซิงค์กระเป๋าเงินสด...")
+      setActionAlert("🔥 สลับเป็นโหมดเทรดจริง (Live Bitget Spot) | กำลังซิงค์เหรียญและกระเป๋าเงินจริง...")
       try {
-        const realAcc = await fetchRealBitgetAssets(newCfg)
-        const liveCash = realAcc ? realAcc.usdtAvailable : 0
+        const realData = await fetchRealBitgetHoldings(newCfg, priceMap)
+        setHoldings(realData.holdings)
         setQuantState((prev) => ({
           ...prev,
-          cashReserveUsdt: liveCash,
+          cashReserveUsdt: realData.usdtAvailable,
+          totalDeployedUsdt: Math.max(0, realData.totalUsdValue - realData.usdtAvailable),
+          activeCoinsCount: realData.holdings.length,
+          statusMessage: realData.holdings.length > 0
+            ? `พอร์ต Bitget Spot รวม $${realData.totalUsdValue.toFixed(2)} USD (${realData.holdings.map((h) => h.baseCoin).join(", ")}) | ยอด USDT ว่าง $${realData.usdtAvailable.toFixed(2)}`
+            : `ยอด USDT ใน Bitget Spot: $${realData.usdtAvailable.toFixed(2)}`,
         }))
         setActionAlert(
-          liveCash > 0
-            ? `🔥 สลับเป็นโหมดเทรดจริง (Live Bitget Spot) เรียบร้อย | ยอดเงินคงเหลือ: $${liveCash.toFixed(2)} USDT`
-            : `🔥 สลับเป็นโหมดเทรดจริง (Live Bitget Spot) เรียบร้อย | ยอด USDT ในกระเป๋า Spot: $0.00`
+          realData.usdtAvailable > 0
+            ? `🔥 โหมดเทรดจริง: ยอดพอร์ตรวม $${realData.totalUsdValue.toFixed(2)} USD (USDT ว่าง: $${realData.usdtAvailable.toFixed(2)})`
+            : `🔥 โหมดเทรดจริง: ยอดพอร์ตรวม $${realData.totalUsdValue.toFixed(2)} USD (${realData.holdings.map((h) => h.baseCoin).join(", ")}) | ยอด USDT ว่าง $0.00`
         )
       } catch {
-        setActionAlert("🔥 สลับเป็นโหมดเทรดจริงแล้ว (ยังไม่มียอด USDT ในกระเป๋า Spot)")
+        setActionAlert("🔥 สลับเป็นโหมดเทรดจริงแล้ว")
       }
     }
-    setTimeout(() => setActionAlert(null), 4000)
-  }, [config])
+    setTimeout(() => setActionAlert(null), 5000)
+  }, [config, priceMap])
 
   // Fetch Tickers & Run Quant Engine (Real Market Data + Real RSI + Real Portfolio Check)
   const runScanCycle = React.useCallback(async () => {
@@ -220,31 +228,46 @@ export function CryptoPageClient() {
         const symbols = topTickers.map((t) => t.symbol)
         const realRsiMap = await fetchBatchRealRsi(symbols)
 
-        // 2. Evaluate Screener with Real Technical Indicators
-        const currentHoldings = loadSpotHoldings(config.isPaperTrading)
-        const evaluated = evaluateScreener(topTickers, currentHoldings, realRsiMap)
-        setTickers(evaluated)
-
-        // 3. Update Holdings with Live Prices (In-memory state only, do NOT trigger KV PUT)
         const pMap: Record<string, number> = {}
         for (const t of topTickers) {
           pMap[t.symbol] = t.lastPr
         }
+
+        let currentHoldings: SpotHolding[] = []
+        let liveTotalValuation = 0
+
+        if (config.isPaperTrading) {
+          currentHoldings = loadSpotHoldings(true)
+        } else {
+          // Live mode: fetch real holdings from Bitget Spot account
+          const realData = await fetchRealBitgetHoldings(config, pMap)
+          currentHoldings = realData.holdings
+          liveTotalValuation = realData.totalUsdValue
+        }
+
+        // 2. Evaluate Screener with Real Technical Indicators
+        const evaluated = evaluateScreener(topTickers, currentHoldings, realRsiMap)
+        setTickers(evaluated)
+
+        // 3. Update Holdings with Live Prices (In-memory state only)
         const updatedHoldings = updateHoldingsWithLivePrices(currentHoldings, pMap)
         setHoldings(updatedHoldings)
-        // Note: Do NOT call saveSpotHoldings here to preserve Cloudflare KV quota.
-        // Holdings are saved only when a real BUY or SELL trade executes.
 
         // 4. Master Quant Check (Take Profit & Cut Loss & Candidate Auto-Buy)
         const { decision, overallState } = runQuantPortfolioCheck(updatedHoldings, config, evaluated)
 
-        // If in Real Live Mode, sync actual USDT balance from Bitget
+        // If in Real Live Mode, sync actual USDT balance and real portfolio valuation
         if (!config.isPaperTrading) {
           const realAcc = await fetchRealBitgetAssets(config)
-          if (realAcc) {
-            overallState.cashReserveUsdt = realAcc.usdtAvailable
-          } else {
-            overallState.cashReserveUsdt = 0
+          const availCash = realAcc ? realAcc.usdtAvailable : 0
+          overallState.cashReserveUsdt = availCash
+          overallState.totalDeployedUsdt = Math.max(0, liveTotalValuation - availCash)
+          overallState.activeCoinsCount = updatedHoldings.length
+
+          if (availCash < 5) {
+            overallState.statusMessage = updatedHoldings.length > 0
+              ? `พอร์ต Bitget Spot รวม $${liveTotalValuation.toFixed(2)} USD (${updatedHoldings.map((h) => h.baseCoin).join(", ")}) | ยอด USDT ว่าง $${availCash.toFixed(2)} (ต้องการขั้นต่ำ $10 เพื่อเปิดไม้ใหม่)`
+              : `ยอด USDT ใน Bitget Spot คือ $0.00 (ต้องการขั้นต่ำ $10 เพื่อให้ Quant เปิดไม้เทรด)`
           }
         }
 
