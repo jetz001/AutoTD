@@ -419,7 +419,42 @@ export async function executeRealBitgetOrder(
     }
   }
 
-  // 1. First priority: Direct Browser WebCrypto request (Bypasses Cloudflare Worker WAF blocks)
+  // 1. First priority: AutoTD Local Bridge (Runs on host machine, zero Cloudflare WAF block, 100% success)
+  try {
+    const bridgeRes = await fetch('http://127.0.0.1:8787/api/order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        apiKey: activeConfig?.apiKey,
+        secretKey: activeConfig?.secretKey,
+        passphrase: activeConfig?.passphrase,
+        order,
+      }),
+      signal: AbortSignal.timeout(2000),
+    });
+    if (bridgeRes.ok) {
+      const bJson = await bridgeRes.json();
+      if (bJson.code === '00000') {
+        return {
+          success: true,
+          data: bJson.data,
+          message: `✓ [Bitget Spot Bridge] ส่งคำสั่งสำเร็จ: orderId=${bJson.data?.orderId || 'ok'}`,
+        };
+      } else if (bJson.code === '43012') {
+        return {
+          success: false,
+          message: `🚨 ยอดเหรียญ/เงินในกระเป๋า Spot ไม่เพียงพอ (Bitget 43012: Insufficient balance)`,
+        };
+      } else if (bJson.code) {
+        return {
+          success: false,
+          message: `Bitget API (${bJson.code}): ${bJson.msg || 'Order failed'}`,
+        };
+      }
+    }
+  } catch {}
+
+  // 2. Second priority: Direct Browser WebCrypto request (Bypasses Cloudflare Worker WAF blocks)
   if (activeConfig?.apiKey && activeConfig?.secretKey && activeConfig?.passphrase) {
     try {
       const timestamp = Date.now().toString();
@@ -431,7 +466,10 @@ export async function executeRealBitgetOrder(
         size: String(order.size),
         clientOid: `td_${Date.now()}`,
       };
-      if (order.price) payload.price = String(order.price);
+      if (order.price) {
+        payload.price = String(order.price);
+        payload.force = 'gtc';
+      }
       const bodyStr = JSON.stringify(payload);
       const sign = await signBitgetRequest(timestamp, 'POST', requestPath, '', bodyStr, activeConfig.secretKey);
 
@@ -1025,6 +1063,22 @@ export async function executeSpotBuyTranche(
   }
 }
 
+export function getCoinPrecision(symbol: string): number {
+  if (symbol.includes('BTC')) return 6;
+  if (symbol.includes('ETH') || symbol.includes('SOL')) return 4;
+  if (symbol.includes('BGB')) return 4;
+  if (symbol.includes('MOODENG') || symbol.includes('NS')) return 2;
+  return 2;
+}
+
+export function formatCoinAmount(amount: number, symbol: string): string {
+  const precision = getCoinPrecision(symbol);
+  const factor = Math.pow(10, precision);
+  // Truncate (floor) to prevent exceeding actual available balance on Bitget
+  const truncated = Math.floor(amount * factor) / factor;
+  return truncated.toFixed(precision);
+}
+
 // Core Execution: SELL OR CUT LOSS 100% (Real & Paper)
 export async function executeSpotSell(
   symbol: string,
@@ -1043,8 +1097,8 @@ export async function executeSpotSell(
 
   // If in Real Live Trading mode, submit to Bitget
   if (config && !config.isPaperTrading) {
-    // Format precision appropriately (e.g. 4 decimals)
-    const sellSize = Number(h.totalAmount).toFixed(4);
+    // Format precision dynamically with truncation
+    const sellSize = formatCoinAmount(h.totalAmount, symbol);
     const orderRes = await executeRealBitgetOrder(
       {
         symbol,

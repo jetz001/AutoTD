@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "bridge": "node scripts/local-bridge.js",
     "lint": "eslint"
   },
   "dependencies": {
