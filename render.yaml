@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: autotd-bridge
+    env: node
+    plan: free
+    region: singapore
+    buildCommand: npm install
+    startCommand: node scripts/local-bridge.js
+    envVars:
+      - key: PORT
+        value: 10000
