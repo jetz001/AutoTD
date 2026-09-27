@@ -49,9 +49,13 @@ export default {
     const isDailyDiscovery = event.cron === "0 0 * * *" || event.cron?.includes("0 0");
     if (isDailyDiscovery) {
       const aiKey = env.OPENROUTER_API_KEY || env.AI_API_KEY;
-      ctx.waitUntil(refreshFreeModelsDaily(aiKey));
+      ctx.waitUntil(refreshFreeModelsDaily(aiKey).catch((e: any) => console.warn("Discovery notice:", e?.message)));
     } else {
-      ctx.waitUntil(executeTradingCycle("CRON_INTERVAL", env));
+      ctx.waitUntil(
+        executeTradingCycle("CRON_INTERVAL", env).catch((err: any) => {
+          console.warn("Cron interval executed with notice:", err?.message || err);
+        })
+      );
     }
   },
 

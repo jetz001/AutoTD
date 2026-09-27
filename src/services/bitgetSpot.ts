@@ -505,6 +505,108 @@ export async function executeRealBitgetOrder(
   }
 }
 
+// Browser WebSocket Asset Fetcher (Bypasses Cloudflare WAF & CORS via AWS CloudFront endpoint)
+export async function fetchRealBitgetAssetsViaWebSocket(config: BitgetConfig): Promise<{
+  usdtAvailable: number;
+  assets: Array<{ coin: string; available: number; frozen: number }>;
+} | null> {
+  if (typeof window === 'undefined' || typeof WebSocket === 'undefined') return null;
+  if (!config.apiKey || !config.secretKey || !config.passphrase) return null;
+
+  return new Promise((resolve) => {
+    let resolved = false;
+    let ws: WebSocket | null = null;
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        try { ws?.close(); } catch {}
+        resolve(null);
+      }
+    }, 5000);
+
+    try {
+      ws = new WebSocket('wss://ws.bitget.com/v2/ws/private');
+
+      ws.onopen = async () => {
+        try {
+          const timestamp = Math.floor(Date.now() / 1000).toString();
+          const sign = await signBitgetRequest(timestamp, 'GET', '/user/verify', '', '', config.secretKey);
+          ws?.send(
+            JSON.stringify({
+              op: 'login',
+              args: [
+                {
+                  apiKey: config.apiKey,
+                  passphrase: config.passphrase,
+                  timestamp,
+                  sign,
+                },
+              ],
+            })
+          );
+        } catch {
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timeout);
+            try { ws?.close(); } catch {}
+            resolve(null);
+          }
+        }
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.event === 'login' && msg.code === 0) {
+            ws?.send(
+              JSON.stringify({
+                op: 'subscribe',
+                args: [{ instType: 'SPOT', channel: 'account', coin: 'default' }],
+              })
+            );
+          } else if (msg.action === 'snapshot' && Array.isArray(msg.data)) {
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timeout);
+              try { ws?.close(); } catch {}
+
+              let usdtAvailable = 0;
+              const assets: Array<{ coin: string; available: number; frozen: number }> = [];
+
+              for (const item of msg.data) {
+                const coin = item.coin || '';
+                const avail = parseFloat(item.available || '0');
+                const frozen = parseFloat(item.frozen || '0');
+                if (coin === 'USDT') usdtAvailable = avail;
+                if (avail > 0 || frozen > 0) {
+                  assets.push({ coin, available: avail, frozen });
+                }
+              }
+
+              resolve({ usdtAvailable, assets });
+            }
+          }
+        } catch {}
+      };
+
+      ws.onerror = () => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          try { ws?.close(); } catch {}
+          resolve(null);
+        }
+      };
+    } catch {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        resolve(null);
+      }
+    }
+  });
+}
+
 export async function fetchRealBitgetAssets(config?: BitgetConfig): Promise<{
   usdtAvailable: number;
   assets: Array<{ coin: string; available: number; frozen: number }>;
@@ -519,7 +621,19 @@ export async function fetchRealBitgetAssets(config?: BitgetConfig): Promise<{
     }
   }
 
-  // 1. First priority: Direct Browser WebCrypto request
+  // 1. First priority: High-speed WebSocket connection (AWS CloudFront, No CORS, No Cloudflare WAF block)
+  if (activeConfig?.apiKey && activeConfig?.secretKey && activeConfig?.passphrase) {
+    try {
+      const wsResult = await fetchRealBitgetAssetsViaWebSocket(activeConfig);
+      if (wsResult && Array.isArray(wsResult.assets)) {
+        return wsResult;
+      }
+    } catch (wsErr) {
+      console.warn('WebSocket assets fetch failed, falling back to direct REST:', wsErr);
+    }
+  }
+
+  // 2. Second priority: Direct Browser WebCrypto request
   if (activeConfig?.apiKey && activeConfig?.secretKey && activeConfig?.passphrase) {
     try {
       const timestamp = Date.now().toString();
@@ -556,7 +670,7 @@ export async function fetchRealBitgetAssets(config?: BitgetConfig): Promise<{
     }
   }
 
-  // 2. Fallback: Cloudflare Pages Proxy Endpoint
+  // 3. Fallback: Cloudflare Pages Proxy Endpoint
   try {
     const headers: Record<string, string> = {};
     if (activeConfig?.apiKey) headers['x-bitget-key'] = activeConfig.apiKey;

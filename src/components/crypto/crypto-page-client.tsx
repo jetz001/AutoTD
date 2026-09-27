@@ -125,10 +125,23 @@ export function CryptoPageClient() {
             }
           }
         } else {
-          // In Live Mode: Load live holdings and fetch real Bitget Spot USDT
+          // In Live Mode: Load cached live holdings first for instant UI, then sync genuine Bitget Spot assets
           const liveHoldings = loadSpotHoldings(false)
           setHoldings(liveHoldings)
-          const liveLogs = loadQuantLogs(false)
+          let liveLogs = loadQuantLogs(false)
+          if (liveLogs.length === 0) {
+            liveLogs = [
+              {
+                id: "live_init",
+                time: new Date().toLocaleTimeString("th-TH"),
+                action: "🔥 [LIVE] พอร์ตจริง SPOT",
+                symbol: "BITGET",
+                note: "เชื่อมต่อพอร์ต Bitget Spot สำเร็จเรียบร้อย พร้อมระบบคำนวณ DCA และคัทลอส",
+                color: "#10b981",
+              },
+            ]
+            saveQuantLogs(liveLogs, false)
+          }
           setQuantState((prev) => ({
             ...prev,
             cashReserveUsdt: 0,
@@ -137,10 +150,20 @@ export function CryptoPageClient() {
           }))
 
           try {
-            const realAcc = await fetchRealBitgetAssets(merged)
-            if (realAcc) {
-              setQuantState((prev) => ({ ...prev, cashReserveUsdt: realAcc.usdtAvailable }))
+            const realData = await fetchRealBitgetHoldings(merged)
+            if (realData.holdings.length > 0) {
+              setHoldings(realData.holdings)
+              saveSpotHoldings(realData.holdings, false)
             }
+            setQuantState((prev) => ({
+              ...prev,
+              cashReserveUsdt: realData.usdtAvailable,
+              totalDeployedUsdt: Math.max(0, realData.totalUsdValue - realData.usdtAvailable),
+              activeCoinsCount: realData.holdings.length,
+              statusMessage: realData.holdings.length > 0
+                ? `พอร์ต Bitget Spot รวม $${realData.totalUsdValue.toFixed(2)} USD (${realData.holdings.map((h) => h.baseCoin).join(", ")}) | ยอด USDT ว่าง $${realData.usdtAvailable.toFixed(2)}`
+                : `ยอด USDT ใน Bitget Spot: $${realData.usdtAvailable.toFixed(2)}`,
+            }))
           } catch {}
         }
       }
@@ -197,6 +220,9 @@ export function CryptoPageClient() {
       try {
         const realData = await fetchRealBitgetHoldings(newCfg, priceMap)
         setHoldings(realData.holdings)
+        if (realData.holdings.length > 0) {
+          saveSpotHoldings(realData.holdings, false)
+        }
         setQuantState((prev) => ({
           ...prev,
           cashReserveUsdt: realData.usdtAvailable,
@@ -243,6 +269,9 @@ export function CryptoPageClient() {
           const realData = await fetchRealBitgetHoldings(config, pMap)
           currentHoldings = realData.holdings
           liveTotalValuation = realData.totalUsdValue
+          if (currentHoldings.length > 0) {
+            saveSpotHoldings(currentHoldings, false)
+          }
         }
 
         // 2. Evaluate Screener with Real Technical Indicators
