@@ -102,11 +102,6 @@ export function saveQuantLogs(logs: Array<{ id: string; time: string; action: st
     if (isPaper) {
       localStorage.setItem(STORAGE_KEY_QUANT_LOGS, JSON.stringify(sliced));
     }
-    fetch('/api/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(isPaper ? { quantLogs: sliced } : { liveQuantLogs: sliced }),
-    }).catch(() => {});
   }
 }
 
