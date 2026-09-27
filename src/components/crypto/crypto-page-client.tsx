@@ -369,7 +369,7 @@ export function CryptoPageClient() {
                 availableCash = freshAcc ? freshAcc.usdtAvailable : 0
                 overallState.cashReserveUsdt = availableCash
 
-                if (availableCash < 5) {
+                if (availableCash < 10) {
                   const newLog = {
                     id: Date.now().toString(),
                     time: new Date().toLocaleTimeString(),
@@ -377,11 +377,11 @@ export function CryptoPageClient() {
                     symbol: decision.symbol,
                     note: availableCash === 0
                       ? `ไม่สามารถตรวจสอบยอดเงินสดจริงจาก Bitget ได้ หรือกระเป๋า Spot มียอด $0.00 ระบบยกเลิกการเปิดไม้ Live เพื่อความปลอดภัย`
-                      : `ยอด USDT ในกระเป๋า Spot มี $${availableCash.toFixed(2)} (ต้องการขั้นต่ำ $10 เพื่อเปิดไม้) กรุณาโอน USDT เข้ากระเป๋า Spot ของ Bitget`,
+                      : `ยอด USDT ในกระเป๋า Spot มี $${availableCash.toFixed(2)} (ต้องการขั้นต่ำ $10 เพื่อเปิดไม้) ระบบพักรอขายทำกำไรเหรียญเดิมเพื่อสะสมเงินสด`,
                     color: "#f59e0b",
                   }
                   saveQuantLogs([newLog, ...loadQuantLogs(config.isPaperTrading)], config.isPaperTrading)
-                  setActionAlert(`⚠️ [LIVE GUARD] ยอด USDT ใน Bitget Spot มี $${availableCash.toFixed(2)} (ไม่พอซื้อขั้นต่ำ $10) ยกเลิกการเปิดไม้`)
+                  setActionAlert(`⚠️ [LIVE GUARD] ยอด USDT มี $${availableCash.toFixed(2)} (ต้องการขั้นต่ำ $10) พักรอเหรียญเดิมทำกำไร`)
                   setTimeout(() => setActionAlert(null), 6000)
                   return
                 }
