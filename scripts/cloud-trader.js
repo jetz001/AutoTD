@@ -316,6 +316,41 @@ async function runAutopilotCycle() {
     }
   }
 
+  if (ACTION_INPUT === 'buy' && SYMBOL_INPUT) {
+    const targetSym = SYMBOL_INPUT.endsWith('USDT') ? SYMBOL_INPUT : `${SYMBOL_INPUT}USDT`;
+    const buySize = AMOUNT_INPUT || '10';
+    console.log(`Executing on-demand buy for ${targetSym} (Budget: $${buySize} USDT)...`);
+    const buyRes = await placeBitgetOrder({
+      symbol: targetSym,
+      side: 'buy',
+      orderType: 'market',
+      size: String(buySize)
+    }, config);
+
+    if (buyRes.code === '00000') {
+      const orderId = buyRes.data?.orderId || 'ok';
+      console.log(`On-demand buy succeeded: orderId=${orderId}`);
+      newLogs.push({
+        id: Date.now().toString(),
+        time: new Date().toLocaleTimeString('th-TH'),
+        action: '🚀 [CLOUD BUY] คำสั่งสำเร็จ',
+        symbol: targetSym,
+        note: `เข้าซื้อสำเร็จบน Bitget Spot orderId=${orderId}`,
+        color: '#10b981'
+      });
+    } else {
+      console.error('On-demand buy failed:', buyRes.code, buyRes.msg);
+      newLogs.push({
+        id: Date.now().toString(),
+        time: new Date().toLocaleTimeString('th-TH'),
+        action: '🚨 [CLOUD BUY] ไม่สำเร็จ',
+        symbol: targetSym,
+        note: `Bitget API (${buyRes.code}): ${buyRes.msg || 'Order failed'}`,
+        color: '#ef4444'
+      });
+    }
+  }
+
   // ==========================================
   // 5. TAKE PROFIT & CUT LOSS EVALUATION (AUTONOMOUS)
   // ==========================================
