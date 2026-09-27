@@ -11,6 +11,10 @@ assets = { directory = "./public", binding = "ASSETS" }
 [triggers]
 crons = ["*/5 * * * *", "0 0 * * *"]
 
+[[kv_namespaces]]
+binding = "AUTOTD_KV"
+id = "bb8e501311f8491baf0827b635bd3ad8"
+
 # Environment Variables
 [vars]
 TRADING_MODE = "SPOT"

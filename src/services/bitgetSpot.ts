@@ -606,10 +606,26 @@ export async function fetchRealBitgetHoldings(
   let totalUsd = usdtAvailable;
   const realHoldings: SpotHolding[] = [];
 
+  // Fetch full market tickers to get prices for all user coins (e.g. MOODENG, NS, BGB)
+  let fullPriceMap: Record<string, number> = { ...(priceMap || {}) };
+  try {
+    const tRes = await fetch('https://api.bitget.com/api/v2/spot/market/tickers');
+    if (tRes.ok) {
+      const tJson = await tRes.json();
+      if (tJson.code === '00000' && Array.isArray(tJson.data)) {
+        for (const t of tJson.data) {
+          if (t.symbol && t.lastPr) {
+            fullPriceMap[t.symbol] = parseFloat(t.lastPr);
+          }
+        }
+      }
+    }
+  } catch {}
+
   for (const a of assets) {
     if (a.coin === 'USDT') continue;
     const sym = `${a.coin}USDT`;
-    const price = priceMap?.[sym] || 0;
+    const price = fullPriceMap[sym] || 0;
     const val = a.available * price;
     totalUsd += val;
 

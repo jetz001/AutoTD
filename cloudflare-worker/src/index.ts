@@ -4,6 +4,7 @@ import { askTradingAgent, MarketContext, AIDecision, fetchLatest6FreeModels, DEF
 export interface Env {
   // Bindings
   ASSETS?: Fetcher;
+  AUTOTD_KV?: KVNamespace;
   
   // Bitget Secrets (wrangler secret put BITGET_API_KEY ...)
   BITGET_API_KEY?: string;
@@ -87,8 +88,24 @@ export default {
 
     // API: ดูสถานะปัจจุบัน & ประวัติการตัดสินใจของ AI
     if (url.pathname === "/api/status") {
-      const bitgetConfigured = Boolean(env.BITGET_API_KEY && env.BITGET_SECRET_KEY);
-      const aiConfigured = Boolean(env.OPENROUTER_API_KEY || env.AI_API_KEY);
+      let apiKey = env.BITGET_API_KEY;
+      let secretKey = env.BITGET_SECRET_KEY;
+      let aiKey = env.OPENROUTER_API_KEY || env.AI_API_KEY;
+
+      if (env.AUTOTD_KV && (!apiKey || !secretKey)) {
+        try {
+          const raw = await env.AUTOTD_KV.get("user_config");
+          if (raw) {
+            const u = JSON.parse(raw);
+            if (u.apiKey) apiKey = u.apiKey;
+            if (u.secretKey) secretKey = u.secretKey;
+            if (u.openrouterApiKey) aiKey = u.openrouterApiKey;
+          }
+        } catch {}
+      }
+
+      const bitgetConfigured = Boolean(apiKey && secretKey);
+      const aiConfigured = Boolean(aiKey);
       return Response.json({
         status: "RUNNING",
         mode: env.TRADING_MODE || "SPOT",
@@ -293,14 +310,32 @@ async function executeTradingCycle(triggerSource: string, env: Env, configOverri
   let positions: any[] = [];
   let balance: any = { USDT: 5000 };
 
-  const hasBitgetKeys = Boolean(env.BITGET_API_KEY && env.BITGET_SECRET_KEY && env.BITGET_PASSPHRASE);
+  let apiKey = env.BITGET_API_KEY;
+  let secretKey = env.BITGET_SECRET_KEY;
+  let passphrase = env.BITGET_PASSPHRASE;
+  let aiKey = env.OPENROUTER_API_KEY || env.AI_API_KEY;
+
+  if (env.AUTOTD_KV && (!apiKey || !secretKey)) {
+    try {
+      const raw = await env.AUTOTD_KV.get("user_config");
+      if (raw) {
+        const u = JSON.parse(raw);
+        if (u.apiKey) apiKey = u.apiKey;
+        if (u.secretKey) secretKey = u.secretKey;
+        if (u.passphrase) passphrase = u.passphrase;
+        if (u.openrouterApiKey) aiKey = u.openrouterApiKey;
+      }
+    } catch {}
+  }
+
+  const hasBitgetKeys = Boolean(apiKey && secretKey && passphrase);
   let bitgetClient: BitgetClient | null = null;
 
   if (hasBitgetKeys) {
     bitgetClient = new BitgetClient({
-      apiKey: env.BITGET_API_KEY!,
-      secretKey: env.BITGET_SECRET_KEY!,
-      passphrase: env.BITGET_PASSPHRASE!,
+      apiKey: apiKey!,
+      secretKey: secretKey!,
+      passphrase: passphrase!,
     });
   }
 
@@ -402,7 +437,6 @@ async function executeTradingCycle(triggerSource: string, env: Env, configOverri
   };
 
   // 1. ให้ AI วิเคราะห์ & ตัดสินใจ (พร้อมระบบ Fallback 6 โมเดล)
-  const aiKey = env.OPENROUTER_API_KEY || env.AI_API_KEY;
   if (lastModelDiscoveryTime === 0 && aiKey) {
     refreshFreeModelsDaily(aiKey).catch(() => {});
   }
