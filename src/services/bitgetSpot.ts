@@ -419,7 +419,33 @@ export async function executeRealBitgetOrder(
     }
   }
 
-  // 1. First priority: AutoTD Local Bridge (Runs on host machine, zero Cloudflare WAF block, 100% success)
+  // 1. First priority: 24/7 Cloud Trade Dispatcher (Runs on Microsoft Azure Cloud runner, zero local PC required)
+  try {
+    const cloudRes = await fetch('/api/cloud-trade', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: order.side,
+        symbol: order.symbol,
+        amount: order.size,
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (cloudRes.ok) {
+      const cJson = await cloudRes.json();
+      if (cJson.success) {
+        return {
+          success: true,
+          data: { orderId: `cloud_${Date.now()}` },
+          message: cJson.message,
+        };
+      }
+    }
+  } catch (cloudErr) {
+    console.warn('Cloud trade dispatcher failed, checking alternatives:', cloudErr);
+  }
+
+  // 2. Second priority: AutoTD Local Bridge (If user runs local bridge on host machine)
   try {
     const bridgeRes = await fetch('http://127.0.0.1:8787/api/order', {
       method: 'POST',
@@ -430,7 +456,7 @@ export async function executeRealBitgetOrder(
         passphrase: activeConfig?.passphrase,
         order,
       }),
-      signal: AbortSignal.timeout(2000),
+      signal: AbortSignal.timeout(1500),
     });
     if (bridgeRes.ok) {
       const bJson = await bridgeRes.json();

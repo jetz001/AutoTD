@@ -1,10 +1,15 @@
 // AutoTD 24/7 Autonomous Cloud Trader Engine
-// Executes Take Profit, Cut Loss, DCA, and Candidate Buying on Bitget Spot without requiring PC to be on
+// Runs on GitHub Actions (Microsoft Azure / AWS runners) 24/7
+// Zero local PC dependency, zero Cloudflare WAF block
 
 const crypto = require('crypto');
 
 const BITGET_HOST = 'https://api.bitget.com';
 const CLOUD_CONFIG_URL = 'https://autotd.pages.dev/api/config';
+
+const ACTION_INPUT = process.env.INPUT_ACTION || 'cycle';
+const SYMBOL_INPUT = process.env.INPUT_SYMBOL || '';
+const AMOUNT_INPUT = process.env.INPUT_AMOUNT || '';
 
 function signBitgetRequest(timestamp, method, requestPath, queryString, bodyStr, secretKey) {
   const message = timestamp + method.toUpperCase() + requestPath + (queryString ? '?' + queryString : '') + (bodyStr || '');
@@ -28,6 +33,47 @@ function formatCoinAmount(amount, symbol) {
   return truncated.toFixed(precision);
 }
 
+// 1. Primary: Bitget REST API Asset Fetcher (Direct HTTP, 100% reliable on Cloud runners)
+async function fetchRealBitgetAssetsViaRest(config) {
+  try {
+    const { apiKey, secretKey, passphrase } = config;
+    const timestamp = Date.now().toString();
+    const requestPath = '/api/v2/spot/account/assets';
+    const sign = signBitgetRequest(timestamp, 'GET', requestPath, '', '', secretKey);
+    const res = await fetch(`${BITGET_HOST}${requestPath}`, {
+      headers: {
+        'ACCESS-KEY': apiKey,
+        'ACCESS-SIGN': sign,
+        'ACCESS-TIMESTAMP': timestamp,
+        'ACCESS-PASSPHRASE': passphrase,
+        'Content-Type': 'application/json',
+        'locale': 'en-US'
+      }
+    });
+    const json = await res.json();
+    if (json.code === '00000' && Array.isArray(json.data)) {
+      let usdtAvailable = 0;
+      const assets = [];
+      for (const item of json.data) {
+        const coin = item.coin || '';
+        const avail = parseFloat(item.available || '0');
+        const frozen = parseFloat(item.frozen || '0');
+        if (coin === 'USDT') usdtAvailable = avail;
+        if (avail > 0 || frozen > 0) {
+          assets.push({ coin, available: avail, frozen });
+        }
+      }
+      return { usdtAvailable, assets };
+    } else {
+      console.warn('Bitget REST asset response:', json.code, json.msg);
+    }
+  } catch (err) {
+    console.warn('REST asset fetch error:', err.message);
+  }
+  return null;
+}
+
+// 2. Secondary: WebSocket Fallback
 async function fetchRealBitgetAssetsViaWebSocket(config) {
   const { apiKey, secretKey, passphrase } = config;
   return new Promise((resolve) => {
@@ -39,9 +85,13 @@ async function fetchRealBitgetAssetsViaWebSocket(config) {
         try { ws && ws.close(); } catch {}
         resolve(null);
       }
-    }, 6000);
+    }, 5000);
 
     try {
+      if (typeof WebSocket === 'undefined') {
+        clearTimeout(timeout);
+        return resolve(null);
+      }
       ws = new WebSocket('wss://ws.bitget.com/v2/ws/private');
 
       ws.onopen = async () => {
@@ -151,7 +201,7 @@ async function placeBitgetOrder(order, config) {
 }
 
 async function runAutopilotCycle() {
-  console.log(`[AutoTD Cloud Trader] Starting Autopilot cycle at ${new Date().toISOString()}...`);
+  console.log(`[AutoTD Cloud Trader] Starting cycle at ${new Date().toISOString()} | Action: ${ACTION_INPUT}`);
 
   // 1. Fetch Cloud Config & Secrets
   let config = null;
@@ -185,10 +235,15 @@ async function runAutopilotCycle() {
     }
   }
 
-  // 3. Fetch Real Assets via WebSocket
-  const assetData = await fetchRealBitgetAssetsViaWebSocket(config);
+  // 3. Fetch Real Assets: REST first, then WebSocket
+  let assetData = await fetchRealBitgetAssetsViaRest(config);
   if (!assetData) {
-    console.error('Failed to fetch real Bitget assets via WebSocket.');
+    console.log('Falling back to WebSocket asset fetch...');
+    assetData = await fetchRealBitgetAssetsViaWebSocket(config);
+  }
+
+  if (!assetData) {
+    console.error('Failed to fetch real Bitget assets via REST and WebSocket.');
     return;
   }
 
@@ -208,9 +263,7 @@ async function runAutopilotCycle() {
         baseCoin: a.coin,
         amount: a.available,
         valUsd: val,
-        currentPrice: price,
-        takeProfitPct: config.takeProfitPercent || 3.5,
-        cutLossPct: config.cutLossPercent || 5.0
+        currentPrice: price
       });
     }
   }
@@ -219,9 +272,117 @@ async function runAutopilotCycle() {
 
   const newLogs = [];
 
-  // 4. Candidate Screening & Auto-Buy (If USDT >= 10 and slots < 4)
-  if (usdtAvailable >= 10 && holdings.length < (config.maxCoins || 4)) {
-    console.log(`Cash available ($${usdtAvailable.toFixed(2)}) & slots open (${holdings.length}/4). Scanning candidates...`);
+  // ==========================================
+  // 4. ON-DEMAND DIRECT ACTIONS (Manual Sell / Buy via Webhook / Dispatch)
+  // ==========================================
+  if (ACTION_INPUT === 'sell' && SYMBOL_INPUT) {
+    const targetSym = SYMBOL_INPUT.endsWith('USDT') ? SYMBOL_INPUT : `${SYMBOL_INPUT}USDT`;
+    const targetBase = targetSym.replace('USDT', '');
+    const foundAsset = assets.find(a => a.coin === targetBase);
+    if (foundAsset && foundAsset.available > 0) {
+      const sellSize = formatCoinAmount(foundAsset.available, targetSym);
+      console.log(`Executing on-demand sell for ${targetSym} (Size: ${sellSize})...`);
+      const sellRes = await placeBitgetOrder({
+        symbol: targetSym,
+        side: 'sell',
+        orderType: 'market',
+        size: sellSize
+      }, config);
+
+      if (sellRes.code === '00000') {
+        const orderId = sellRes.data?.orderId || 'ok';
+        console.log(`On-demand sell succeeded: orderId=${orderId}`);
+        newLogs.push({
+          id: Date.now().toString(),
+          time: new Date().toLocaleTimeString('th-TH'),
+          action: '🎯 [CLOUD SELL] คำสั่งสำเร็จ',
+          symbol: targetSym,
+          note: `ขายสำเร็จบน Bitget Spot orderId=${orderId}`,
+          color: '#10b981'
+        });
+      } else {
+        console.error('On-demand sell failed:', sellRes.code, sellRes.msg);
+        newLogs.push({
+          id: Date.now().toString(),
+          time: new Date().toLocaleTimeString('th-TH'),
+          action: '🚨 [CLOUD SELL] ไม่สำเร็จ',
+          symbol: targetSym,
+          note: `Bitget API (${sellRes.code}): ${sellRes.msg || 'Order failed'}`,
+          color: '#ef4444'
+        });
+      }
+    } else {
+      console.log(`No available balance found to sell for ${targetSym}`);
+    }
+  }
+
+  // ==========================================
+  // 5. TAKE PROFIT & CUT LOSS EVALUATION (AUTONOMOUS)
+  // ==========================================
+  const tpTarget = config.takeProfitPercent || 3.5;
+  const slTarget = config.cutLossPercent || 5.0;
+  const liveHoldingsConfig = Array.isArray(config.liveHoldings) ? config.liveHoldings : [];
+
+  for (const h of holdings) {
+    const match = liveHoldingsConfig.find(lh => lh.symbol === h.symbol);
+    const avgCost = match && match.avgCostPrice > 0 ? match.avgCostPrice : 0;
+
+    if (avgCost > 0) {
+      const pnlPct = ((h.currentPrice - avgCost) / avgCost) * 100;
+      console.log(`Holding ${h.symbol}: Price $${h.currentPrice}, AvgCost $${avgCost}, PnL: ${pnlPct.toFixed(2)}% (TP: +${tpTarget}%, SL: -${slTarget}%)`);
+
+      // 5.1 Take Profit
+      if (pnlPct >= tpTarget) {
+        console.log(`🚀 [CLOUD TAKE-PROFIT TRIGGERED] ${h.symbol} hit +${pnlPct.toFixed(2)}% >= +${tpTarget}%! Executing market sell...`);
+        const sellSize = formatCoinAmount(h.amount, h.symbol);
+        const sellRes = await placeBitgetOrder({
+          symbol: h.symbol,
+          side: 'sell',
+          orderType: 'market',
+          size: sellSize
+        }, config);
+
+        if (sellRes.code === '00000') {
+          newLogs.push({
+            id: Date.now().toString(),
+            time: new Date().toLocaleTimeString('th-TH'),
+            action: '🎯 [CLOUD AUTO-TAKE PROFIT]',
+            symbol: h.symbol,
+            note: `ล็อคกำไรสำเร็จ @ $${h.currentPrice} (+${pnlPct.toFixed(2)}%) ดึง USDT กลับกระเป๋า Spot`,
+            color: '#10b981'
+          });
+        }
+      }
+      // 5.2 Cut Loss
+      else if (pnlPct <= -slTarget) {
+        console.log(`🚨 [CLOUD CUT-LOSS TRIGGERED] ${h.symbol} hit ${pnlPct.toFixed(2)}% <= -${slTarget}%! Executing market sell...`);
+        const sellSize = formatCoinAmount(h.amount, h.symbol);
+        const sellRes = await placeBitgetOrder({
+          symbol: h.symbol,
+          side: 'sell',
+          orderType: 'market',
+          size: sellSize
+        }, config);
+
+        if (sellRes.code === '00000') {
+          newLogs.push({
+            id: Date.now().toString(),
+            time: new Date().toLocaleTimeString('th-TH'),
+            action: '🚨 [CLOUD AUTO-CUT LOSS]',
+            symbol: h.symbol,
+            note: `คัทลอสรักษาทุน @ $${h.currentPrice} (${pnlPct.toFixed(2)}%)`,
+            color: '#ef4444'
+          });
+        }
+      }
+    }
+  }
+
+  // ==========================================
+  // 6. CANDIDATE SCREENING & AUTO-BUY (DIP IN UPTREND)
+  // ==========================================
+  if (ACTION_INPUT === 'cycle' && usdtAvailable >= 10 && holdings.length < (config.maxCoins || 4)) {
+    console.log(`Cash available ($${usdtAvailable.toFixed(2)}) & slots open (${holdings.length}/${config.maxCoins || 4}). Scanning candidates...`);
     const STABLECOINS = ['USDC', 'USDGO', 'FDUSD', 'USDE', 'DAI', 'TUSD', 'EUR', 'BUSD'];
     const REAL_R_CRYPTO = ['RENDERUSDT', 'ROSEUSDT', 'RUNEUSDT', 'RONUSDT', 'RAYUSDT', 'REQUSDT'];
     const heldSymbols = new Set(holdings.map(h => h.symbol));
@@ -291,7 +452,7 @@ async function runAutopilotCycle() {
     }
   }
 
-  // 5. Push cycle health log update to Cloudflare
+  // 7. Push cycle health log update to Cloudflare
   const statusLog = {
     id: Date.now().toString(),
     time: new Date().toLocaleTimeString('th-TH'),

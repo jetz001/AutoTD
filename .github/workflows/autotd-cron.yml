@@ -2,9 +2,22 @@ name: AutoTD 24/7 Autopilot Cloud Trader
 
 on:
   schedule:
-    # Run every 10 minutes continuously 24/7
-    - cron: '*/10 * * * *'
+    # Run every 5 minutes continuously 24/7 on Microsoft Azure / AWS
+    - cron: '*/5 * * * *'
   workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform: cycle, sell, buy'
+        required: false
+        default: 'cycle'
+      symbol:
+        description: 'Target symbol (e.g. MOODENGUSDT)'
+        required: false
+        default: ''
+      amount:
+        description: 'Amount or size'
+        required: false
+        default: ''
 
 concurrency:
   group: autotd-cron-execution
@@ -23,7 +36,11 @@ jobs:
       - name: Setup Node.js Environment
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Run Autopilot Trading Cycle
+        env:
+          INPUT_ACTION: ${{ github.event.inputs.action || 'cycle' }}
+          INPUT_SYMBOL: ${{ github.event.inputs.symbol || '' }}
+          INPUT_AMOUNT: ${{ github.event.inputs.amount || '' }}
         run: node scripts/cloud-trader.js
