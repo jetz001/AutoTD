@@ -1,4 +1,5 @@
 interface Env {
+  AUTOTD_KV?: KVNamespace;
   BITGET_API_KEY?: string;
   BITGET_SECRET_KEY?: string;
   BITGET_PASSPHRASE?: string;
@@ -32,8 +33,8 @@ async function generateSignature(
   return btoa(binary);
 }
 
-function getCredentials(request: Request, env: any, bodyJson?: any) {
-  const apiKey =
+async function getCredentials(request: Request, env: any, bodyJson?: any) {
+  let apiKey =
     request.headers.get("x-bitget-key") ||
     bodyJson?.apiKey ||
     env?.BITGET_API_KEY ||
@@ -41,7 +42,7 @@ function getCredentials(request: Request, env: any, bodyJson?: any) {
     env?.BG_API_KEY ||
     env?.BG_KEY ||
     "";
-  const secretKey =
+  let secretKey =
     request.headers.get("x-bitget-secret") ||
     bodyJson?.secretKey ||
     env?.BITGET_SECRET_KEY ||
@@ -49,7 +50,7 @@ function getCredentials(request: Request, env: any, bodyJson?: any) {
     env?.BG_SECRET_KEY ||
     env?.BG_SECRET ||
     "";
-  const passphrase =
+  let passphrase =
     request.headers.get("x-bitget-passphrase") ||
     bodyJson?.passphrase ||
     env?.BITGET_PASSPHRASE ||
@@ -58,6 +59,19 @@ function getCredentials(request: Request, env: any, bodyJson?: any) {
     env?.BG_PASSPHRASE ||
     env?.BG_PASS ||
     "";
+
+  if (env?.AUTOTD_KV && (!apiKey || !secretKey || !passphrase)) {
+    try {
+      const raw = await env.AUTOTD_KV.get("user_config");
+      if (raw) {
+        const u = JSON.parse(raw);
+        if (u.apiKey && !apiKey) apiKey = u.apiKey;
+        if (u.secretKey && !secretKey) secretKey = u.secretKey;
+        if (u.passphrase && !passphrase) passphrase = u.passphrase;
+      }
+    } catch {}
+  }
+
   return { apiKey, secretKey, passphrase };
 }
 
@@ -79,7 +93,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
   if (request.method === "GET") {
     if (action === "sync-config") {
-      const creds = getCredentials(request, env);
+      const creds = await getCredentials(request, env);
       return Response.json(
         {
           code: "00000",
@@ -94,7 +108,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       );
     }
 
-    const { apiKey, secretKey, passphrase } = getCredentials(request, env);
+    const { apiKey, secretKey, passphrase } = await getCredentials(request, env);
     if (!apiKey || !secretKey || !passphrase) {
       return Response.json(
         { code: "40001", msg: "Missing Bitget API credentials (API Key, Secret Key, or Passphrase)" },
@@ -130,7 +144,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           "ACCESS-PASSPHRASE": passphrase,
           "Content-Type": "application/json",
           "Accept": "application/json",
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "User-Agent": "Bitget-Client/1.0",
           locale: "en-US",
         },
       });
@@ -150,7 +164,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       bodyJson = {};
     }
 
-    const { apiKey, secretKey, passphrase } = getCredentials(request, env, bodyJson);
+    const { apiKey, secretKey, passphrase } = await getCredentials(request, env, bodyJson);
     if (!apiKey || !secretKey || !passphrase) {
       return Response.json(
         { code: "40001", msg: "Missing Bitget API credentials (API Key, Secret Key, or Passphrase)" },
@@ -193,7 +207,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           "ACCESS-PASSPHRASE": passphrase,
           "Content-Type": "application/json",
           "Accept": "application/json",
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "User-Agent": "Bitget-Client/1.0",
           locale: "en-US",
         },
         body: bodyStr,

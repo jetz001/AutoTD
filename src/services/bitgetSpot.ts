@@ -559,9 +559,9 @@ export async function fetchRealBitgetAssets(config?: BitgetConfig): Promise<{
   // 2. Fallback: Cloudflare Pages Proxy Endpoint
   try {
     const headers: Record<string, string> = {};
-    if (config?.apiKey) headers['x-bitget-key'] = config.apiKey;
-    if (config?.secretKey) headers['x-bitget-secret'] = config.secretKey;
-    if (config?.passphrase) headers['x-bitget-passphrase'] = config.passphrase;
+    if (activeConfig?.apiKey) headers['x-bitget-key'] = activeConfig.apiKey;
+    if (activeConfig?.secretKey) headers['x-bitget-secret'] = activeConfig.secretKey;
+    if (activeConfig?.passphrase) headers['x-bitget-passphrase'] = activeConfig.passphrase;
 
     const res = await fetch('/api/bitget?action=assets', { headers });
     if (!res.ok) return null;
