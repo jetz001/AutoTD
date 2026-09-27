@@ -23,7 +23,6 @@ export interface QuantExecutiveState {
   recentLogs: Array<{ id: string; time: string; action: string; symbol: string; note: string; color: string }>;
 }
 
-const STORAGE_KEY_QUANT_LOGS = 'bitget_quant_logs_v1';
 
 // Standard 14-period RSI calculation from candle closes
 export function calculateRSI(closes: number[], period = 14): number {
@@ -56,13 +55,21 @@ export function calculateRSI(closes: number[], period = 14): number {
   return Math.round(100 - (100 / (1 + rs)));
 }
 
-export function loadQuantLogs(): Array<{ id: string; time: string; action: string; symbol: string; note: string; color: string }> {
+const STORAGE_KEY_QUANT_LOGS = 'bitget_quant_logs_v1';
+const STORAGE_KEY_PAPER_LOGS = 'bitget_quant_paper_logs_v2';
+const STORAGE_KEY_LIVE_LOGS = 'bitget_quant_live_logs_v2';
+
+export function loadQuantLogs(isPaper = true): Array<{ id: string; time: string; action: string; symbol: string; note: string; color: string }> {
   if (typeof window === 'undefined') return [];
-  const s = localStorage.getItem(STORAGE_KEY_QUANT_LOGS);
+  const key = isPaper ? STORAGE_KEY_PAPER_LOGS : STORAGE_KEY_LIVE_LOGS;
+  let s = localStorage.getItem(key);
+  if (!s && isPaper) {
+    s = localStorage.getItem(STORAGE_KEY_QUANT_LOGS);
+  }
   if (s) {
     try {
       const parsed = JSON.parse(s);
-      if (Array.isArray(parsed)) {
+      if (Array.isArray(parsed) && parsed.length > 0) {
         // Filter out legacy mock logs
         const cleaned = parsed.filter((log: any) => 
           !log.note?.includes('15m RSI 38.4') && 
@@ -78,21 +85,27 @@ export function loadQuantLogs(): Array<{ id: string; time: string; action: strin
       id: 'init-1',
       time: new Date().toLocaleTimeString(),
       action: 'SYSTEM READY',
-      symbol: 'QUANT ENGINE',
-      note: 'ระบบพร้อมทำงาน - รอสัญญาณ Dip in Uptrend จากตลาดสด Bitget Spot',
+      symbol: isPaper ? 'PAPER BOT' : 'BITGET LIVE',
+      note: isPaper
+        ? 'โหมดจำลอง (Paper Trading) พร้อมทำงาน - รอสัญญาณ Dip in Uptrend'
+        : 'โหมดเทรดจริง (Live Bitget Spot) พร้อมทำงาน - ซิงค์ยอดเงินจริงจากกระเป๋า Bitget',
       color: '#10b981',
     },
   ];
 }
 
-export function saveQuantLogs(logs: Array<{ id: string; time: string; action: string; symbol: string; note: string; color: string }>) {
+export function saveQuantLogs(logs: Array<{ id: string; time: string; action: string; symbol: string; note: string; color: string }>, isPaper = true) {
   if (typeof window !== 'undefined') {
+    const key = isPaper ? STORAGE_KEY_PAPER_LOGS : STORAGE_KEY_LIVE_LOGS;
     const sliced = logs.slice(0, 20);
-    localStorage.setItem(STORAGE_KEY_QUANT_LOGS, JSON.stringify(sliced));
+    localStorage.setItem(key, JSON.stringify(sliced));
+    if (isPaper) {
+      localStorage.setItem(STORAGE_KEY_QUANT_LOGS, JSON.stringify(sliced));
+    }
     fetch('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ quantLogs: sliced }),
+      body: JSON.stringify(isPaper ? { quantLogs: sliced } : { liveQuantLogs: sliced }),
     }).catch(() => {});
   }
 }
@@ -191,7 +204,8 @@ export function runQuantPortfolioCheck(
   decision: QuantDecision | null;
   overallState: QuantExecutiveState;
 } {
-  const logs = loadQuantLogs();
+  const isPaper = config.isPaperTrading ?? true;
+  const logs = loadQuantLogs(isPaper);
   let decision: QuantDecision | null = null;
   let status: QuantExecutiveState['status'] = 'SCANNING';
   let statusMessage = 'กำลังสแกนตลาด Top 20 Spot Bitget เพื่อหาจังหวะ Dip in Uptrend';
@@ -286,7 +300,7 @@ export function runQuantPortfolioCheck(
     activeCoinsCount: holdings.length,
     maxCoinsLimit: config.maxCoins,
     totalDeployedUsdt: totalDeployed,
-    cashReserveUsdt: Math.max(0, 10000 - totalDeployed + totalUnrealizedPnl),
+    cashReserveUsdt: isPaper ? Math.max(0, 10000 - totalDeployed + totalUnrealizedPnl) : 0,
     recentLogs: logs,
   };
 

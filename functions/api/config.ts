@@ -41,6 +41,9 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     paperBalance: 10000,
     holdings: [],
     quantLogs: [],
+    liveHoldings: [],
+    liveLogs: [],
+    liveQuantLogs: [],
   };
 
   let savedConfig: any = null;
@@ -95,6 +98,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     paperBalance: 10000,
     holdings: [],
     quantLogs: [],
+    liveHoldings: [],
+    liveLogs: [],
+    liveQuantLogs: [],
   };
 
   try {

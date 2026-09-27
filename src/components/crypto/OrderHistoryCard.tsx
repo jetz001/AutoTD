@@ -84,7 +84,7 @@ export function OrderHistoryCard({ config, quantLogs }: Props) {
 
   // Filtered Quant Logs
   const filteredQuantLogs = React.useMemo(() => {
-    const logs = quantLogs && quantLogs.length > 0 ? quantLogs : loadQuantLogs()
+    const logs = quantLogs && quantLogs.length > 0 ? quantLogs : loadQuantLogs(config.isPaperTrading)
     return logs.filter((log) => {
       const matchSearch =
         !searchQuery ||
@@ -100,7 +100,7 @@ export function OrderHistoryCard({ config, quantLogs }: Props) {
             log.action.toUpperCase().includes("CUT")))
       return matchSearch && matchSide
     })
-  }, [quantLogs, searchQuery, sideFilter])
+  }, [quantLogs, searchQuery, sideFilter, config.isPaperTrading])
 
   // Export to CSV
   function handleExportCsv() {
@@ -138,12 +138,18 @@ export function OrderHistoryCard({ config, quantLogs }: Props) {
 
   function handleClearLogs() {
     if (typeof window !== "undefined") {
-      if (confirm("ต้องการล้างประวัติบันทึกการตัดสินใจทั้งหมดใช่หรือไม่?")) {
-        localStorage.removeItem("bitget_quant_logs_v1")
+      const modeText = config.isPaperTrading ? "โหมดจำลอง (Paper)" : "โหมดเทรดจริง (Live)"
+      if (confirm(`ต้องการล้างประวัติบันทึกการตัดสินใจของ ${modeText} ทั้งหมดใช่หรือไม่?`)) {
+        if (config.isPaperTrading) {
+          localStorage.removeItem("bitget_quant_paper_logs_v2")
+          localStorage.removeItem("bitget_quant_logs_v1")
+        } else {
+          localStorage.removeItem("bitget_quant_live_logs_v2")
+        }
         fetch("/api/config", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ quantLogs: [] }),
+          body: JSON.stringify(config.isPaperTrading ? { quantLogs: [] } : { liveLogs: [] }),
         }).finally(() => {
           window.location.reload()
         })

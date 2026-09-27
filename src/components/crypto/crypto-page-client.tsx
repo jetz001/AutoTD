@@ -50,88 +50,97 @@ export function CryptoPageClient() {
   const [selectedSymbol, setSelectedSymbol] = React.useState("BTCUSDT")
   const [tickers, setTickers] = React.useState<SpotTickerItem[]>([])
   const [holdings, setHoldings] = React.useState<SpotHolding[]>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("bitget_spot_holdings_v1")
-      if (saved && saved.includes("176.4")) {
-        localStorage.removeItem("bitget_spot_holdings_v1")
-      }
-    }
-    return loadSpotHoldings()
+    return loadSpotHoldings(config.isPaperTrading ?? true)
   })
   const [isScanning, setIsScanning] = React.useState(false)
   const [actionAlert, setActionAlert] = React.useState<string | null>(null)
 
   // Quant Executive State
-  const [quantState, setQuantState] = React.useState<QuantExecutiveState>({
-    status: "SCANNING",
-    statusMessage: "กำลังสแกนตลาด Top Spot Bitget เพื่อหาจังหวะ Dip in Uptrend",
-    roundGoalPercent: config.takeProfitPercent,
-    currentRoundProgressPercent: 0,
-    activeCoinsCount: 0,
-    maxCoinsLimit: config.maxCoins,
-    totalDeployedUsdt: 0,
-    cashReserveUsdt: getPaperBalance(),
-    recentLogs: loadQuantLogs(),
+  const [quantState, setQuantState] = React.useState<QuantExecutiveState>(() => {
+    const isPaper = config.isPaperTrading ?? true
+    const initHoldings = loadSpotHoldings(isPaper)
+    return {
+      status: "SCANNING",
+      statusMessage: "กำลังสแกนตลาด Top Spot Bitget เพื่อหาจังหวะ Dip in Uptrend",
+      roundGoalPercent: config.takeProfitPercent,
+      currentRoundProgressPercent: 0,
+      activeCoinsCount: initHoldings.length,
+      maxCoinsLimit: config.maxCoins,
+      totalDeployedUsdt: 0,
+      cashReserveUsdt: isPaper ? getPaperBalance() : 0,
+      recentLogs: loadQuantLogs(isPaper),
+    }
   })
 
-  // Auto-sync Bitget config & credentials & Paper Portfolio from Cloudflare Pages across PC and Mobile
+  // Auto-sync Bitget config & credentials from Cloudflare Pages across PC and Mobile
   React.useEffect(() => {
-    syncBitgetConfigFromCloudflare().then((synced) => {
+    syncBitgetConfigFromCloudflare().then(async (synced) => {
       if (synced) {
-        setConfig((prev) => {
-          const merged: BitgetConfig = {
-            ...prev,
-            ...synced,
-            apiKey: synced.apiKey || prev.apiKey,
-            secretKey: synced.secretKey || prev.secretKey,
-            passphrase: synced.passphrase || prev.passphrase,
-            openrouterApiKey: synced.openrouterApiKey || prev.openrouterApiKey,
-            isPaperTrading: typeof synced.isPaperTrading === "boolean" ? synced.isPaperTrading : prev.isPaperTrading,
-            autoPilotEnabled: typeof synced.autoPilotEnabled === "boolean" ? synced.autoPilotEnabled : prev.autoPilotEnabled,
-            tranchePercent: synced.tranchePercent ?? prev.tranchePercent,
-            takeProfitPercent: synced.takeProfitPercent ?? prev.takeProfitPercent,
-            cutLossPercent: synced.cutLossPercent ?? prev.cutLossPercent,
-            maxTranches: synced.maxTranches ?? prev.maxTranches,
-            maxCoins: synced.maxCoins ?? prev.maxCoins,
-            cashReservePercent: synced.cashReservePercent ?? prev.cashReservePercent,
-            autoRebalanceEnabled: typeof synced.autoRebalanceEnabled === "boolean" ? synced.autoRebalanceEnabled : prev.autoRebalanceEnabled,
-          }
-          saveBitgetConfig(merged)
-          return merged
-        })
-
-        // Cross-device Paper Portfolio & Balance Sync
-        const localHoldings = loadSpotHoldings()
-        if (Array.isArray(synced.holdings) && synced.holdings.length > 0) {
-          saveSpotHoldings(synced.holdings)
-          setHoldings(synced.holdings)
-        } else if (localHoldings.length > 0) {
-          saveSpotHoldings(localHoldings)
+        const targetMode = typeof synced.isPaperTrading === "boolean" ? synced.isPaperTrading : config.isPaperTrading
+        const merged: BitgetConfig = {
+          ...config,
+          ...synced,
+          apiKey: synced.apiKey || config.apiKey,
+          secretKey: synced.secretKey || config.secretKey,
+          passphrase: synced.passphrase || config.passphrase,
+          openrouterApiKey: synced.openrouterApiKey || config.openrouterApiKey,
+          isPaperTrading: targetMode,
+          autoPilotEnabled: typeof synced.autoPilotEnabled === "boolean" ? synced.autoPilotEnabled : config.autoPilotEnabled,
+          tranchePercent: synced.tranchePercent ?? config.tranchePercent,
+          takeProfitPercent: synced.takeProfitPercent ?? config.takeProfitPercent,
+          cutLossPercent: synced.cutLossPercent ?? config.cutLossPercent,
+          maxTranches: synced.maxTranches ?? config.maxTranches,
+          maxCoins: synced.maxCoins ?? config.maxCoins,
+          cashReservePercent: synced.cashReservePercent ?? config.cashReservePercent,
+          autoRebalanceEnabled: typeof synced.autoRebalanceEnabled === "boolean" ? synced.autoRebalanceEnabled : config.autoRebalanceEnabled,
         }
+        setConfig(merged)
+        saveBitgetConfig(merged)
 
-        if (typeof synced.paperBalance === "number" && synced.paperBalance > 0) {
-          if (localHoldings.length === 0 && Array.isArray(synced.holdings) && synced.holdings.length > 0) {
-            setPaperBalance(synced.paperBalance)
-            setQuantState((prev) => ({ ...prev, cashReserveUsdt: synced.paperBalance! }))
-          } else if (getPaperBalance() === 10000 && synced.paperBalance !== 10000) {
+        if (targetMode) {
+          // In Paper Mode: Sync paper portfolio and paper balance
+          const localHoldings = loadSpotHoldings(true)
+          if (Array.isArray(synced.holdings) && synced.holdings.length > 0) {
+            saveSpotHoldings(synced.holdings, true)
+            setHoldings(synced.holdings)
+          } else if (localHoldings.length > 0) {
+            setHoldings(localHoldings)
+          }
+
+          if (typeof synced.paperBalance === "number" && synced.paperBalance > 0) {
             setPaperBalance(synced.paperBalance)
             setQuantState((prev) => ({ ...prev, cashReserveUsdt: synced.paperBalance! }))
           }
-        } else if (getPaperBalance() !== 10000) {
-          setPaperBalance(getPaperBalance())
-        }
 
-        if (Array.isArray(synced.quantLogs)) {
-          if (synced.quantLogs.length === 0) {
-            localStorage.removeItem("bitget_quant_logs_v1")
-            setQuantState((prev) => ({ ...prev, recentLogs: [] }))
-          } else {
-            const localLogs = loadQuantLogs()
-            if (localLogs.length <= 1) {
-              saveQuantLogs(synced.quantLogs)
-              setQuantState((prev) => ({ ...prev, recentLogs: synced.quantLogs }))
+          if (Array.isArray(synced.quantLogs)) {
+            if (synced.quantLogs.length === 0) {
+              setQuantState((prev) => ({ ...prev, recentLogs: [] }))
+            } else {
+              const localLogs = loadQuantLogs(true)
+              if (localLogs.length <= 1) {
+                saveQuantLogs(synced.quantLogs, true)
+                setQuantState((prev) => ({ ...prev, recentLogs: synced.quantLogs }))
+              }
             }
           }
+        } else {
+          // In Live Mode: Load live holdings and fetch real Bitget Spot USDT
+          const liveHoldings = loadSpotHoldings(false)
+          setHoldings(liveHoldings)
+          const liveLogs = loadQuantLogs(false)
+          setQuantState((prev) => ({
+            ...prev,
+            cashReserveUsdt: 0,
+            recentLogs: liveLogs,
+            activeCoinsCount: liveHoldings.length,
+          }))
+
+          try {
+            const realAcc = await fetchRealBitgetAssets(merged)
+            if (realAcc) {
+              setQuantState((prev) => ({ ...prev, cashReserveUsdt: realAcc.usdtAvailable }))
+            }
+          } catch {}
         }
       }
     })
@@ -149,6 +158,58 @@ export function CryptoPageClient() {
   // Execution concurrency guard lock
   const isExecutingTradeRef = React.useRef(false)
 
+  // Mode toggle handler (Paper Trading vs Live Trading)
+  const handleToggleMode = React.useCallback(async (targetMode?: boolean) => {
+    const newMode = typeof targetMode === "boolean" ? targetMode : !config.isPaperTrading
+    const newCfg: BitgetConfig = { ...config, isPaperTrading: newMode }
+    setConfig(newCfg)
+    saveBitgetConfig(newCfg)
+
+    // 1. Immediately switch holdings to target mode
+    const modeHoldings = loadSpotHoldings(newMode)
+    setHoldings(modeHoldings)
+
+    // 2. Immediately switch logs to target mode
+    const modeLogs = loadQuantLogs(newMode)
+
+    if (newMode) {
+      // Paper Mode
+      const paperBal = getPaperBalance()
+      setQuantState((prev) => ({
+        ...prev,
+        cashReserveUsdt: paperBal,
+        recentLogs: modeLogs,
+        activeCoinsCount: modeHoldings.length,
+      }))
+      setActionAlert("🛡️ สลับเป็นโหมดจำลอง (Paper Trading) แล้ว | บัญชีปลอดภัย ไม่เสียเงินจริง")
+    } else {
+      // Live Mode
+      setQuantState((prev) => ({
+        ...prev,
+        cashReserveUsdt: 0,
+        recentLogs: modeLogs,
+        activeCoinsCount: modeHoldings.length,
+      }))
+      setActionAlert("🔥 สลับเป็นโหมดเทรดจริง (Live Bitget Spot) | กำลังซิงค์กระเป๋าเงินสด...")
+      try {
+        const realAcc = await fetchRealBitgetAssets(newCfg)
+        const liveCash = realAcc ? realAcc.usdtAvailable : 0
+        setQuantState((prev) => ({
+          ...prev,
+          cashReserveUsdt: liveCash,
+        }))
+        setActionAlert(
+          liveCash > 0
+            ? `🔥 สลับเป็นโหมดเทรดจริง (Live Bitget Spot) เรียบร้อย | ยอดเงินคงเหลือ: $${liveCash.toFixed(2)} USDT`
+            : `🔥 สลับเป็นโหมดเทรดจริง (Live Bitget Spot) เรียบร้อย | ยอด USDT ในกระเป๋า Spot: $0.00`
+        )
+      } catch {
+        setActionAlert("🔥 สลับเป็นโหมดเทรดจริงแล้ว (ยังไม่มียอด USDT ในกระเป๋า Spot)")
+      }
+    }
+    setTimeout(() => setActionAlert(null), 4000)
+  }, [config])
+
   // Fetch Tickers & Run Quant Engine (Real Market Data + Real RSI + Real Portfolio Check)
   const runScanCycle = React.useCallback(async () => {
     setIsScanning(true)
@@ -160,7 +221,7 @@ export function CryptoPageClient() {
         const realRsiMap = await fetchBatchRealRsi(symbols)
 
         // 2. Evaluate Screener with Real Technical Indicators
-        const currentHoldings = loadSpotHoldings()
+        const currentHoldings = loadSpotHoldings(config.isPaperTrading)
         const evaluated = evaluateScreener(topTickers, currentHoldings, realRsiMap)
         setTickers(evaluated)
 
@@ -199,7 +260,7 @@ export function CryptoPageClient() {
               note: el.reason || el.note || el.message || "วิเคราะห์ตลาดอัตโนมัติ",
               color: el.action?.includes("BUY") ? "#10b981" : el.action?.includes("CUT") ? "#ef4444" : "#38bdf8",
             }))
-            const localLogs = loadQuantLogs()
+            const localLogs = loadQuantLogs(config.isPaperTrading)
             overallState.recentLogs = [...edgeLogs, ...localLogs].slice(0, 15)
           }
         } catch {}
@@ -225,8 +286,8 @@ export function CryptoPageClient() {
                 note: `${decision.reason} | ดึงเงินสดกลับกระเป๋าทันที`,
                 color: "#ef4444",
               }
-              const logs = [newLog, ...loadQuantLogs()]
-              saveQuantLogs(logs)
+              const logs = [newLog, ...loadQuantLogs(config.isPaperTrading)]
+              saveQuantLogs(logs, config.isPaperTrading)
             }
             // 5.2 AUTO-SELL: TAKE PROFIT (100% Market Sell on target)
             else if (decision.action === "TAKE_PROFIT") {
@@ -243,8 +304,8 @@ export function CryptoPageClient() {
                 note: `${decision.reason} | ล็อคกำไรสำเร็จ`,
                 color: "#10b981",
               }
-              const logs = [newLog, ...loadQuantLogs()]
-              saveQuantLogs(logs)
+              const logs = [newLog, ...loadQuantLogs(config.isPaperTrading)]
+              saveQuantLogs(logs, config.isPaperTrading)
             }
             // 5.3 AUTO-BUY: DCA TRANCHE or NEW TRANCHE 1 (Hybrid Quant + OpenRouter AI)
             else if (decision.action === "BUY_TRANCHE") {
@@ -267,7 +328,7 @@ export function CryptoPageClient() {
                       : `ยอด USDT ในกระเป๋า Spot มี $${availableCash.toFixed(2)} (ต้องการขั้นต่ำ $10 เพื่อเปิดไม้) กรุณาโอน USDT เข้ากระเป๋า Spot ของ Bitget`,
                     color: "#f59e0b",
                   }
-                  saveQuantLogs([newLog, ...loadQuantLogs()])
+                  saveQuantLogs([newLog, ...loadQuantLogs(config.isPaperTrading)], config.isPaperTrading)
                   setActionAlert(`⚠️ [LIVE GUARD] ยอด USDT ใน Bitget Spot มี $${availableCash.toFixed(2)} (ไม่พอซื้อขั้นต่ำ $10) ยกเลิกการเปิดไม้`)
                   setTimeout(() => setActionAlert(null), 6000)
                   return
@@ -316,8 +377,8 @@ export function CryptoPageClient() {
                   note: `${res.message} | ${aiReason}`,
                   color: "#0ea5e9",
                 }
-                const logs = [newLog, ...loadQuantLogs()]
-                saveQuantLogs(logs)
+                const logs = [newLog, ...loadQuantLogs(config.isPaperTrading)]
+                saveQuantLogs(logs, config.isPaperTrading)
               } else {
                 // AI recommended to hold/wait
                 const newLog = {
@@ -328,8 +389,8 @@ export function CryptoPageClient() {
                   note: `AI แนะนำชะลอการเข้าซื้อ: ${aiReason}`,
                   color: "#f59e0b",
                 }
-                const logs = [newLog, ...loadQuantLogs()]
-                saveQuantLogs(logs)
+                const logs = [newLog, ...loadQuantLogs(config.isPaperTrading)]
+                saveQuantLogs(logs, config.isPaperTrading)
               }
             }
           } catch (execErr: any) {
@@ -369,8 +430,8 @@ export function CryptoPageClient() {
       note: res.message,
       color: "#0ea5e9",
     }
-    const logs = [newLog, ...loadQuantLogs()]
-    saveQuantLogs(logs)
+    const logs = [newLog, ...loadQuantLogs(config.isPaperTrading)]
+    saveQuantLogs(logs, config.isPaperTrading)
     runScanCycle()
   }
 
@@ -392,8 +453,8 @@ export function CryptoPageClient() {
       note: res.message,
       color: isCutLoss ? "#ef4444" : "#10b981",
     }
-    const logs = [newLog, ...loadQuantLogs()]
-    saveQuantLogs(logs)
+    const logs = [newLog, ...loadQuantLogs(config.isPaperTrading)]
+    saveQuantLogs(logs, config.isPaperTrading)
     runScanCycle()
   }
 
@@ -426,8 +487,8 @@ export function CryptoPageClient() {
       note: res.message,
       color: "#a855f7",
     }
-    const logs = [newLog, ...loadQuantLogs()]
-    saveQuantLogs(logs)
+    const logs = [newLog, ...loadQuantLogs(config.isPaperTrading)]
+    saveQuantLogs(logs, config.isPaperTrading)
     runScanCycle()
   }
 
@@ -533,18 +594,7 @@ export function CryptoPageClient() {
           {/* Mode Pill (Clickable toggle) */}
           <button
             type="button"
-            onClick={() => {
-              const newMode = !config.isPaperTrading
-              const newCfg = { ...config, isPaperTrading: newMode }
-              setConfig(newCfg)
-              saveBitgetConfig(newCfg)
-              setActionAlert(
-                newMode
-                  ? "🛡️ สลับเป็นโหมดจำลอง (Paper Trading) แล้ว ไม่เสียเงินจริง"
-                  : "🔥 สลับเป็นโหมดเทรดจริง (Live Bitget Spot) แล้ว"
-              )
-              setTimeout(() => setActionAlert(null), 3500)
-            }}
+            onClick={() => handleToggleMode()}
             title="กดเพื่อสลับโหมด Paper / Live ได้ทันที"
             className={`rounded-lg px-2.5 py-1 text-[11px] font-bold border transition-all cursor-pointer active:scale-95 ${
               config.isPaperTrading
@@ -616,18 +666,7 @@ export function CryptoPageClient() {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => {
-              const newMode = !config.isPaperTrading
-              const newCfg = { ...config, isPaperTrading: newMode }
-              setConfig(newCfg)
-              saveBitgetConfig(newCfg)
-              setActionAlert(
-                newMode
-                  ? "🛡️ สลับเป็นโหมดจำลอง (Paper Trading) แล้ว ปลอดภัย ไม่เสียเงินจริง"
-                  : "🔥 สลับเป็นโหมดเทรดจริง (Live Bitget Spot) แล้ว"
-              )
-              setTimeout(() => setActionAlert(null), 3500)
-            }}
+            onClick={() => handleToggleMode()}
             className={`h-7 sm:h-8 gap-1 text-[11px] sm:text-xs font-bold justify-center transition-all ${
               config.isPaperTrading
                 ? "bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20"

@@ -51,6 +51,8 @@ export interface SpotTickerItem {
 
 const STORAGE_KEY_CONFIG = 'bitget_spot_config_v1';
 const STORAGE_KEY_HOLDINGS = 'bitget_spot_holdings_v1';
+const STORAGE_KEY_PAPER_HOLDINGS = 'bitget_spot_paper_holdings_v2';
+const STORAGE_KEY_LIVE_HOLDINGS = 'bitget_spot_live_holdings_v2';
 const STORAGE_KEY_COOLDOWN = 'bitget_spot_cooldown_v1';
 const STORAGE_KEY_PAPER_BALANCE = 'bitget_spot_paper_balance_v1';
 
@@ -671,10 +673,14 @@ export async function fetchRealBitgetOrderHistory(
   }
 }
 
-// Load Spot Holdings
-export function loadSpotHoldings(): SpotHolding[] {
+// Load Spot Holdings (Separated by Paper vs Live mode)
+export function loadSpotHoldings(isPaper = true): SpotHolding[] {
   if (typeof window === 'undefined') return [];
-  const saved = localStorage.getItem(STORAGE_KEY_HOLDINGS);
+  const key = isPaper ? STORAGE_KEY_PAPER_HOLDINGS : STORAGE_KEY_LIVE_HOLDINGS;
+  let saved = localStorage.getItem(key);
+  if (!saved && isPaper) {
+    saved = localStorage.getItem(STORAGE_KEY_HOLDINGS);
+  }
   if (saved) {
     try {
       return JSON.parse(saved);
@@ -683,13 +689,21 @@ export function loadSpotHoldings(): SpotHolding[] {
   return [];
 }
 
-export function saveSpotHoldings(holdings: SpotHolding[]) {
+export function saveSpotHoldings(holdings: SpotHolding[], isPaper = true) {
   if (typeof window !== 'undefined') {
-    localStorage.setItem(STORAGE_KEY_HOLDINGS, JSON.stringify(holdings));
+    const key = isPaper ? STORAGE_KEY_PAPER_HOLDINGS : STORAGE_KEY_LIVE_HOLDINGS;
+    localStorage.setItem(key, JSON.stringify(holdings));
+    if (isPaper) {
+      localStorage.setItem(STORAGE_KEY_HOLDINGS, JSON.stringify(holdings));
+    }
     fetch('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ holdings, paperBalance: getPaperBalance() }),
+      body: JSON.stringify(
+        isPaper
+          ? { holdings, paperBalance: getPaperBalance() }
+          : { liveHoldings: holdings }
+      ),
     }).catch(() => {});
   }
 }
@@ -701,7 +715,8 @@ export async function executeSpotBuyTranche(
   usdtAmount: number,
   config: BitgetConfig
 ): Promise<{ success: boolean; message: string; updatedHoldings: SpotHolding[] }> {
-  const holdings = loadSpotHoldings();
+  const isPaper = config.isPaperTrading ?? true;
+  const holdings = loadSpotHoldings(isPaper);
   const existingIdx = holdings.findIndex(h => h.symbol === symbol);
   const coinsBought = usdtAmount / price;
   const nowStr = new Date().toLocaleTimeString();
@@ -823,7 +838,8 @@ export async function executeSpotSell(
   isCutLoss = false,
   config?: BitgetConfig
 ): Promise<{ success: boolean; message: string; realizedPnl: number; updatedHoldings: SpotHolding[] }> {
-  const holdings = loadSpotHoldings();
+  const isPaper = config ? (config.isPaperTrading ?? true) : true;
+  const holdings = loadSpotHoldings(isPaper);
   const idx = holdings.findIndex(h => h.symbol === symbol);
   if (idx === -1) {
     return { success: false, message: `ไม่พบเหรียญ ${symbol} ในพอร์ต`, realizedPnl: 0, updatedHoldings: holdings };
@@ -861,7 +877,7 @@ export async function executeSpotSell(
 
   // Remove from holdings
   holdings.splice(idx, 1);
-  saveSpotHoldings(holdings);
+  saveSpotHoldings(holdings, isPaper);
 
   // Return funds to paper balance if paper trading
   if (!config || config.isPaperTrading) {
