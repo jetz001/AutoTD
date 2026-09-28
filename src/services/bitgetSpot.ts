@@ -312,11 +312,13 @@ export async function consultOpenRouterAgent(
   }
 }
 
-// Calculate Tranche Budget based on available cash (Default 20% of cash, min $10 USDT)
+// Calculate Tranche Budget based on available cash (Dynamic with Bitget Spot min $5 USDT)
 export function calculateTrancheBudget(availableUsdt: number, tranchePercent = 20): number {
-  if (availableUsdt <= 0) return 10;
-  const calculated = (availableUsdt * (tranchePercent || 20)) / 100;
-  return Math.max(10, parseFloat(calculated.toFixed(2)));
+  if (availableUsdt < 5) return 0;
+  const safeUsdt = Math.max(0, Math.floor((availableUsdt - 0.05) * 100) / 100);
+  const calculated = (safeUsdt * (tranchePercent || 20)) / 100;
+  const target = Math.max(5, parseFloat(calculated.toFixed(2)));
+  return Math.min(target, safeUsdt);
 }
 
 // Edge Bot Integration

@@ -173,6 +173,7 @@ export function CryptoPageClient() {
 
   // Execution concurrency guard lock
   const isExecutingTradeRef = React.useRef(false)
+  const lastInsufficientLogTimeRef = React.useRef(0)
 
   // Mode toggle handler (Paper Trading vs Live Trading)
   const handleToggleMode = React.useCallback(async (targetMode?: boolean) => {
@@ -361,20 +362,50 @@ export function CryptoPageClient() {
                 availableCash = freshAcc ? freshAcc.usdtAvailable : 0
                 overallState.cashReserveUsdt = availableCash
 
-                if (availableCash < 10) {
-                  const newLog = {
-                    id: Date.now().toString(),
-                    time: new Date().toLocaleTimeString(),
-                    action: "⚠️ [INSUFFICIENT USDT]",
-                    symbol: decision.symbol,
-                    note: availableCash === 0
-                      ? `ไม่สามารถตรวจสอบยอดเงินสดจริงจาก Bitget ได้ หรือกระเป๋า Spot มียอด $0.00 ระบบยกเลิกการเปิดไม้ Live เพื่อความปลอดภัย`
-                      : `ยอด USDT ในกระเป๋า Spot มี $${availableCash.toFixed(2)} (ต้องการขั้นต่ำ $10 เพื่อเปิดไม้) ระบบพักรอขายทำกำไรเหรียญเดิมเพื่อสะสมเงินสด`,
-                    color: "#f59e0b",
+                const maxSpendable = Math.max(0, Math.floor((availableCash - 0.05) * 100) / 100)
+
+                // If available cash is strictly less than Bitget Spot minimum ($5 USDT)
+                if (maxSpendable < 5) {
+                  // Check if Auto Rebalance is enabled to rotate out stagnant asset for new capital
+                  if (config.autoRebalanceEnabled && updatedHoldings.length > 0) {
+                    const weakest = findWeakestHolding(updatedHoldings)
+                    if (weakest && weakest.symbol !== decision.symbol && Math.abs(weakest.pnlPercent) < 2.5) {
+                      const rebRes = await executeRebalanceRotation(weakest.symbol, decision.symbol, decision.price, config)
+                      setHoldings(rebRes.updatedHoldings)
+                      setActionAlert(`🔄 [AUTO REBALANCE] ${rebRes.message}`)
+                      setTimeout(() => setActionAlert(null), 6000)
+
+                      const rebLog = {
+                        id: Date.now().toString(),
+                        time: new Date().toLocaleTimeString(),
+                        action: "🔄 [AUTO REBALANCE]",
+                        symbol: `${weakest.symbol} ➜ ${decision.symbol}`,
+                        note: `เงินสดไม่พอ ($${availableCash.toFixed(2)}) สลับตัวถืออัตโนมัติ: ปิดเหรียญนิ่ง ${weakest.symbol} (PnL ${weakest.pnlPercent.toFixed(1)}%) ดึงเงินสดเข้าสะสม ${decision.symbol}`,
+                        color: "#a855f7",
+                      }
+                      saveQuantLogs([rebLog, ...loadQuantLogs(config.isPaperTrading)], config.isPaperTrading)
+                      return
+                    }
                   }
-                  saveQuantLogs([newLog, ...loadQuantLogs(config.isPaperTrading)], config.isPaperTrading)
-                  setActionAlert(`⚠️ [LIVE GUARD] ยอด USDT มี $${availableCash.toFixed(2)} (ต้องการขั้นต่ำ $10) พักรอเหรียญเดิมทำกำไร`)
-                  setTimeout(() => setActionAlert(null), 6000)
+
+                  // If cannot rebalance, throttle log so it does NOT spam every 5 seconds (cooldown 180s)
+                  const now = Date.now()
+                  if (now - lastInsufficientLogTimeRef.current > 180000) {
+                    lastInsufficientLogTimeRef.current = now
+                    const newLog = {
+                      id: Date.now().toString(),
+                      time: new Date().toLocaleTimeString(),
+                      action: "⚠️ [INSUFFICIENT USDT]",
+                      symbol: decision.symbol,
+                      note: availableCash === 0
+                        ? `ไม่สามารถตรวจสอบยอดเงินสดจริงจาก Bitget ได้ หรือกระเป๋า Spot มียอด $0.00 ระบบยกเลิกการเปิดไม้ Live เพื่อความปลอดภัย`
+                        : `ยอด USDT ในกระเป๋า Spot มี $${availableCash.toFixed(2)} (ต่ำกว่าขั้นต่ำ $5 ของ Bitget) ระบบพักรอขายทำกำไรเหรียญเดิมเพื่อสะสมเงินสด`,
+                      color: "#f59e0b",
+                    }
+                    saveQuantLogs([newLog, ...loadQuantLogs(config.isPaperTrading)], config.isPaperTrading)
+                    setActionAlert(`⚠️ [LIVE GUARD] ยอด USDT มี $${availableCash.toFixed(2)} (ขั้นต่ำ $5) พักรอเหรียญเดิมทำกำไร`)
+                    setTimeout(() => setActionAlert(null), 6000)
+                  }
                   return
                 }
               }
