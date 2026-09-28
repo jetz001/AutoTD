@@ -2,12 +2,16 @@
 
 import * as React from "react"
 import Script from "next/script"
-import { AlertTriangle, LogOut, ShieldCheck, Lock } from "lucide-react"
+import { AlertTriangle, LogOut, ShieldCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 const AUTHORIZED_EMAIL = "jimwar02@gmail.com"
 const STORAGE_KEY_SESSION = "autotd_auth_session_30d"
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000 // 30 วัน
+
+const GOOGLE_CLIENT_ID =
+  process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ||
+  "923607029699-ca3iblmagb592gfrnsu0sldh7602i71k.apps.googleusercontent.com"
 
 declare global {
   interface Window {
@@ -61,7 +65,7 @@ export function GmailSecurityGate({ children }: { children: React.ReactNode }) {
   const [isClient, setIsClient] = React.useState(false)
   const [isLoading, setIsLoading] = React.useState(false)
 
-  // Verify existing 30-day session
+  // Verify existing 30-day session on mount
   React.useEffect(() => {
     setIsClient(true)
     try {
@@ -96,7 +100,7 @@ export function GmailSecurityGate({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  // Callback from Google OAuth credential response (ID Token)
+  // Callback from Google OAuth credential response (ID Token JWT)
   const handleGoogleCredentialResponse = React.useCallback(
     (response: any) => {
       setIsLoading(true)
@@ -128,11 +132,10 @@ export function GmailSecurityGate({ children }: { children: React.ReactNode }) {
 
   // Initialize Google Identity Services
   const initGsi = React.useCallback(() => {
-    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ""
-    if (clientId && typeof window !== "undefined" && window.google?.accounts?.id) {
+    if (typeof window !== "undefined" && window.google?.accounts?.id) {
       try {
         window.google.accounts.id.initialize({
-          client_id: clientId,
+          client_id: GOOGLE_CLIENT_ID,
           callback: handleGoogleCredentialResponse,
           auto_select: false,
           cancel_on_tap_outside: true,
@@ -149,18 +152,18 @@ export function GmailSecurityGate({ children }: { children: React.ReactNode }) {
     setIsLoading(true)
     setErrorMsg("")
 
-    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ""
-
-    // 1. If Google Identity Services OAuth2 is available
-    if (clientId && typeof window !== "undefined" && window.google?.accounts?.oauth2) {
+    // 1. Google Identity Services OAuth 2.0 Popup
+    if (typeof window !== "undefined" && window.google?.accounts?.oauth2) {
       try {
         const tokenClient = window.google.accounts.oauth2.initTokenClient({
-          client_id: clientId,
+          client_id: GOOGLE_CLIENT_ID,
           scope: "https://www.googleapis.com/auth/userinfo.email openid profile",
           callback: async (tokenResponse: any) => {
             if (tokenResponse?.error) {
-              if (tokenResponse.error !== "popup_closed_by_user") {
-                setErrorMsg("เกิดข้อผิดพลาดในการลงชื่อเข้าใช้ Google: " + (tokenResponse.error_description || tokenResponse.error))
+              if (tokenResponse.error === "popup_closed_by_user") {
+                setErrorMsg("คุณปิดหน้าต่างการลงชื่อเข้าใช้ Google")
+              } else {
+                setErrorMsg("เกิดข้อผิดพลาดจาก Google: " + (tokenResponse.error_description || tokenResponse.error))
               }
               setIsLoading(false)
               return
@@ -195,19 +198,22 @@ export function GmailSecurityGate({ children }: { children: React.ReactNode }) {
       }
     }
 
-    // 2. Try GIS Prompt if One Tap is ready
-    if (clientId && typeof window !== "undefined" && window.google?.accounts?.id) {
-      window.google.accounts.id.prompt((notification: any) => {
-        if (notification.isNotDisplayed()) {
-          setErrorMsg("ไม่สามารถแสดงหน้าต่างลงชื่อเข้าใช้ Google ได้บนเบราว์เซอร์นี้ กรุณาเปิดจากหน้าต่างปกติ")
-          setIsLoading(false)
-        }
-      })
-      return
+    // 2. Fallback to GIS Prompt
+    if (typeof window !== "undefined" && window.google?.accounts?.id) {
+      try {
+        window.google.accounts.id.prompt((notification: any) => {
+          if (notification.isNotDisplayed()) {
+            setErrorMsg("เบราว์เซอร์บล็อกหน้าต่างป็อปอัป กรุณาอนุญาตป็อปอัปสำหรับเว็บไซต์นี้")
+            setIsLoading(false)
+          }
+        })
+        return
+      } catch (err: any) {
+        console.error(err)
+      }
     }
 
-    // 3. If Client ID is not configured in environment yet
-    setErrorMsg("⚠️ ระบบรอการผูก Google Client ID ใน Cloudflare Pages กรุณาแจ้ง Admin")
+    setErrorMsg("กำลังเชื่อมต่อไปยังบริการ Google Identity กรุณารอสักครู่แล้วลองใหม่")
     setIsLoading(false)
   }
 
@@ -245,7 +251,7 @@ export function GmailSecurityGate({ children }: { children: React.ReactNode }) {
     )
   }
 
-  // PURE PITCH BLACK MINIMAL LOGIN CARD - ONLY 1 GOOGLE AUTH BUTTON
+  // PURE PITCH BLACK MINIMAL LOGIN CARD - EXACTLY 1 GOOGLE AUTH BUTTON
   return (
     <>
       <Script
@@ -272,7 +278,7 @@ export function GmailSecurityGate({ children }: { children: React.ReactNode }) {
             <Button
               onClick={handleGoogleLoginClick}
               disabled={isLoading}
-              className="w-full h-12 bg-white hover:bg-zinc-200 text-black font-bold gap-3 text-sm transition-all shadow-lg rounded-full"
+              className="w-full h-12 bg-white hover:bg-zinc-200 text-black font-bold gap-3 text-sm transition-all shadow-lg rounded-full cursor-pointer"
             >
               <GoogleIcon className="h-5 w-5" />
               <span>{isLoading ? "กำลังลงชื่อเข้าใช้..." : "ลงชื่อเข้าใช้ด้วย Google"}</span>
