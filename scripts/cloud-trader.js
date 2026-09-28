@@ -318,36 +318,52 @@ async function runAutopilotCycle() {
 
   if (ACTION_INPUT === 'buy' && SYMBOL_INPUT) {
     const targetSym = SYMBOL_INPUT.endsWith('USDT') ? SYMBOL_INPUT : `${SYMBOL_INPUT}USDT`;
-    const buySize = AMOUNT_INPUT || '10';
-    console.log(`Executing on-demand buy for ${targetSym} (Budget: $${buySize} USDT)...`);
-    const buyRes = await placeBitgetOrder({
-      symbol: targetSym,
-      side: 'buy',
-      orderType: 'market',
-      size: String(buySize)
-    }, config);
+    const requestedSize = parseFloat(AMOUNT_INPUT || '10');
+    // Safety buffer (0.05 USDT) to prevent 43012 Insufficient balance when balance is e.g. 9.99 USDT
+    const maxAvailable = Math.max(0, Math.floor((usdtAvailable - 0.05) * 100) / 100);
+    const buySize = Math.min(requestedSize, maxAvailable);
 
-    if (buyRes.code === '00000') {
-      const orderId = buyRes.data?.orderId || 'ok';
-      console.log(`On-demand buy succeeded: orderId=${orderId}`);
-      newLogs.push({
-        id: Date.now().toString(),
-        time: new Date().toLocaleTimeString('th-TH'),
-        action: '🚀 [CLOUD BUY] คำสั่งสำเร็จ',
-        symbol: targetSym,
-        note: `เข้าซื้อสำเร็จบน Bitget Spot orderId=${orderId}`,
-        color: '#10b981'
-      });
-    } else {
-      console.error('On-demand buy failed:', buyRes.code, buyRes.msg);
+    if (buySize < 5) {
+      console.error(`Insufficient USDT balance: $${usdtAvailable.toFixed(2)} (Need at least $5 USDT for Bitget Spot)`);
       newLogs.push({
         id: Date.now().toString(),
         time: new Date().toLocaleTimeString('th-TH'),
         action: '🚨 [CLOUD BUY] ไม่สำเร็จ',
         symbol: targetSym,
-        note: `Bitget API (${buyRes.code}): ${buyRes.msg || 'Order failed'}`,
+        note: `ยอด USDT ใน Bitget Spot มีเพียง $${usdtAvailable.toFixed(2)} ไม่พอสำหรับขั้นต่ำ $5.00 USDT (ต้องเติม USDT ในกระเป๋า Spot)`,
         color: '#ef4444'
       });
+    } else {
+      console.log(`Executing on-demand buy for ${targetSym} (Budget: $${buySize.toFixed(2)} USDT / Available: $${usdtAvailable.toFixed(2)})...`);
+      const buyRes = await placeBitgetOrder({
+        symbol: targetSym,
+        side: 'buy',
+        orderType: 'market',
+        size: String(buySize.toFixed(2))
+      }, config);
+
+      if (buyRes.code === '00000') {
+        const orderId = buyRes.data?.orderId || 'ok';
+        console.log(`On-demand buy succeeded: orderId=${orderId}`);
+        newLogs.push({
+          id: Date.now().toString(),
+          time: new Date().toLocaleTimeString('th-TH'),
+          action: '🚀 [CLOUD BUY] คำสั่งสำเร็จ',
+          symbol: targetSym,
+          note: `เข้าซื้อสำเร็จบน Bitget Spot orderId=${orderId} มูลค่า $${buySize.toFixed(2)} USDT`,
+          color: '#10b981'
+        });
+      } else {
+        console.error('On-demand buy failed:', buyRes.code, buyRes.msg);
+        newLogs.push({
+          id: Date.now().toString(),
+          time: new Date().toLocaleTimeString('th-TH'),
+          action: '🚨 [CLOUD BUY] ไม่สำเร็จ',
+          symbol: targetSym,
+          note: `Bitget API (${buyRes.code}): ${buyRes.msg || 'Order failed'}`,
+          color: '#ef4444'
+        });
+      }
     }
   }
 
@@ -529,12 +545,15 @@ async function runAutopilotCycle() {
         }
       }
 
-      if (aiApproved) {
+      const maxAvailable = Math.max(0, Math.floor((usdtAvailable - 0.05) * 100) / 100);
+      const buySize = Math.min(10, maxAvailable);
+
+      if (buySize >= 5 && aiApproved) {
         const buyRes = await placeBitgetOrder({
           symbol: best.symbol,
           side: 'buy',
           orderType: 'market',
-          size: '10'
+          size: String(buySize.toFixed(2))
         }, config);
 
         if (buyRes.code === '00000') {
@@ -543,11 +562,22 @@ async function runAutopilotCycle() {
             time: new Date().toLocaleTimeString('th-TH'),
             action: '🚀 [CLOUD AUTO-BUY]',
             symbol: best.symbol,
-            note: `ช้อนซื้อ Dip in Uptrend สำเร็จ (${aiModelUsed} Score ${best.totalScore}/100) มูลค่า $10 USDT @ $${best.price} | เหตุผล: ${aiDecision.reason || 'AI ผ่านเกณฑ์'}`,
+            note: `ช้อนซื้อ Dip in Uptrend สำเร็จ (${aiModelUsed} Score ${best.totalScore}/100) มูลค่า $${buySize.toFixed(2)} USDT @ $${best.price} | เหตุผล: ${aiDecision.reason || 'AI ผ่านเกณฑ์'}`,
             color: '#10b981'
           };
           newLogs.push(buyLog);
+        } else {
+          newLogs.push({
+            id: Date.now().toString(),
+            time: new Date().toLocaleTimeString('th-TH'),
+            action: '🚨 [CLOUD AUTO-BUY] ไม่สำเร็จ',
+            symbol: best.symbol,
+            note: `Bitget API (${buyRes.code}): ${buyRes.msg || 'Order failed'}`,
+            color: '#ef4444'
+          });
         }
+      } else if (buySize < 5 && aiApproved) {
+        console.log(`Auto-buy skipped: USDT available ($${usdtAvailable.toFixed(2)}) is less than minimum $5`);
       } else {
         console.log(`AI Sentinel vetoed buy for ${best.symbol}: ${aiDecision.reason}`);
       }
