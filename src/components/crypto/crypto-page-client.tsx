@@ -174,6 +174,7 @@ export function CryptoPageClient() {
   // Execution concurrency guard lock
   const isExecutingTradeRef = React.useRef(false)
   const lastInsufficientLogTimeRef = React.useRef(0)
+  const lastLoggedRateLimitTimeRef = React.useRef('')
 
   // Mode toggle handler (Paper Trading vs Live Trading)
   const handleToggleMode = React.useCallback(async (targetMode?: boolean) => {
@@ -433,6 +434,22 @@ export function CryptoPageClient() {
                   aiReason = `[AI: ${agentDecision.modelUsed}] ${agentDecision.reason}`
                   if (agentDecision.action === "HOLD" && agentDecision.confidence < 70) {
                     shouldExecuteBuy = false
+                  }
+
+                  // If AI returned isCoolingDown (Rate Limit hit), log ONLY ONCE with exact timestamps
+                  if (agentDecision.isCoolingDown && agentDecision.limitedAt && agentDecision.resumeAt) {
+                    if (agentDecision.limitedAt !== lastLoggedRateLimitTimeRef.current) {
+                      lastLoggedRateLimitTimeRef.current = agentDecision.limitedAt
+                      const coolLog = {
+                        id: Date.now().toString(),
+                        time: new Date().toLocaleTimeString("th-TH"),
+                        action: "⏳ [AI COOLDOWN]",
+                        symbol: decision.symbol,
+                        note: `Agent ติด Rate Limit เมื่อ ${agentDecision.limitedAt} | จะเริ่มเรียกใหม่เวลา ${agentDecision.resumeAt} (ระหว่างนี้ระบบ Quant เฝ้าตรวจจับสัญญาณเงียบๆ ไม่ยิง API ซ้ำ)`,
+                        color: "#f59e0b",
+                      }
+                      saveQuantLogs([coolLog, ...loadQuantLogs(config.isPaperTrading)], config.isPaperTrading)
+                    }
                   }
                 }
               }

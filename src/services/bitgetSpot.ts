@@ -272,6 +272,11 @@ export interface AIAgentDecision {
   modelUsed: string;
   symbol: string;
   price: number;
+  isCoolingDown?: boolean;
+  limitedAt?: string;
+  resumeAt?: string;
+  stopLossPrice?: number;
+  takeProfitPrice?: number;
 }
 
 export async function consultOpenRouterAgent(

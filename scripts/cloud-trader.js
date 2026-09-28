@@ -539,6 +539,20 @@ async function runAutopilotCycle() {
               aiModelUsed = 'groq/qwen3.8-27b';
               if (parsed.action === 'HOLD' && parsed.confidence >= 70) aiApproved = false;
             }
+          } else if (gRes.status === 429) {
+            const retryHeader = gRes.headers.get('retry-after');
+            const waitSec = retryHeader ? parseInt(retryHeader, 10) || 60 : 60;
+            const limitedAt = new Date().toLocaleTimeString('th-TH');
+            const resumeAt = new Date(Date.now() + waitSec * 1000).toLocaleTimeString('th-TH');
+            console.log(`[Cloud Trader] Groq Rate limit hit at ${limitedAt}, cooling down until ${resumeAt}`);
+            newLogs.push({
+              id: Date.now().toString(),
+              time: limitedAt,
+              action: '⏳ [AI COOLDOWN]',
+              symbol: best.symbol,
+              note: `Agent ติด Rate Limit (Groq) เมื่อ ${limitedAt} | จะเริ่มเรียกใหม่เวลา ${resumeAt} (ระหว่างทาง Quant ตรวจสอบตลาดเงียบๆ ไม่ยิง API ซ้ำ)`,
+              color: '#f59e0b'
+            });
           }
         } catch (e) {
           console.warn('Groq cloud sentinel warning:', e.message);
@@ -565,6 +579,18 @@ async function runAutopilotCycle() {
               aiModelUsed = 'openrouter/qwen3.8-27b:free';
               if (parsed.action === 'HOLD' && parsed.confidence >= 70) aiApproved = false;
             }
+          } else if (oRes.status === 429) {
+            const limitedAt = new Date().toLocaleTimeString('th-TH');
+            const resumeAt = new Date(Date.now() + 120 * 1000).toLocaleTimeString('th-TH');
+            console.log(`[Cloud Trader] OpenRouter Rate limit hit at ${limitedAt}, cooling down until ${resumeAt}`);
+            newLogs.push({
+              id: Date.now().toString(),
+              time: limitedAt,
+              action: '⏳ [AI COOLDOWN]',
+              symbol: best.symbol,
+              note: `Agent ติด Rate Limit (OpenRouter) เมื่อ ${limitedAt} | จะเริ่มเรียกใหม่เวลา ${resumeAt} (ระหว่างทาง Quant ตรวจสอบตลาดเงียบๆ ไม่ยิง API ซ้ำ)`,
+              color: '#f59e0b'
+            });
           }
         } catch (e) {
           console.warn('OpenRouter cloud sentinel warning:', e.message);

@@ -30,6 +30,15 @@ let cachedFreeModels: string[] = [...DEFAULT_FREE_MODELS];
 let lastModelsFetchTime = 0;
 const CACHE_TTL_MS = 3600 * 1000; // 1 hour
 
+// AI Agent Rate Limit & Cooldown Protection Tracker
+let aiRateLimitState = {
+  isLimited: false,
+  limitedAt: "",
+  resumeAt: "",
+  resumeTimestamp: 0,
+  provider: "",
+};
+
 export async function getLiveFreeModels(apiKey?: string): Promise<string[]> {
   const now = Date.now();
   if (cachedFreeModels.length >= 3 && now - lastModelsFetchTime < CACHE_TTL_MS) {
@@ -153,6 +162,33 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     recentCandles = [],
   } = body;
 
+  const now = Date.now();
+  // 0. RATE LIMIT COOLDOWN GUARD: If currently in cooldown, do NOT burn any API calls!
+  if (now < aiRateLimitState.resumeTimestamp) {
+    const remainingSec = Math.ceil((aiRateLimitState.resumeTimestamp - now) / 1000);
+    return Response.json(
+      {
+        code: "00000",
+        msg: "rate_limited_cooldown",
+        data: {
+          action: aiScore >= 80 ? "BUY_SPOT" : "HOLD",
+          confidence: aiScore >= 80 ? 80 : 50,
+          reason: `[AI Cooldown] ติด Rate Limit (${aiRateLimitState.provider}) เมื่อ ${aiRateLimitState.limitedAt} | จะเริ่มเรียก AI ใหม่อัตโนมัติเวลา ${aiRateLimitState.resumeAt} (โหมดประหยัดโควต้า: Quant เฝ้าระวังเงียบๆ โดยไม่ยิง API ซ้ำ)`,
+          modelUsed: "quant_passive_sentinel",
+          symbol,
+          price: currentPrice,
+          isCoolingDown: true,
+          limitedAt: aiRateLimitState.limitedAt,
+          resumeAt: aiRateLimitState.resumeAt,
+          remainingSec,
+        },
+      },
+      { headers: corsHeaders }
+    );
+  } else if (aiRateLimitState.isLimited) {
+    aiRateLimitState.isLimited = false;
+  }
+
   const prompt = `
 You are the Chief Quantitative AI Trading Agent for Bitget Spot Exchange.
 Evaluate this Dip-in-Uptrend candidate:
@@ -203,6 +239,21 @@ Respond ONLY with valid JSON in this exact structure:
         });
 
         if (!res.ok) {
+          if (res.status === 429) {
+            const retryHeader = res.headers.get("retry-after") || res.headers.get("x-ratelimit-reset");
+            const waitSeconds = retryHeader ? Math.min(300, Math.max(30, parseInt(retryHeader, 10) || 60)) : 60;
+            const resumeTime = new Date(Date.now() + waitSeconds * 1000);
+            aiRateLimitState = {
+              isLimited: true,
+              limitedAt: new Date().toLocaleTimeString("th-TH"),
+              resumeAt: resumeTime.toLocaleTimeString("th-TH"),
+              resumeTimestamp: Date.now() + waitSeconds * 1000,
+              provider: `Groq/${model}`,
+            };
+            console.warn(`[AutoTD Agent] Groq 429 hit, cooling down until ${aiRateLimitState.resumeAt}`);
+            lastError = new Error(`Groq rate limit hit, cooldown until ${aiRateLimitState.resumeAt}`);
+            break; // Break out of Groq loop to avoid burning more rate limits
+          }
           lastError = new Error(`Groq ${model} returned HTTP ${res.status}`);
           continue;
         }
@@ -269,6 +320,19 @@ Respond ONLY with valid JSON in this exact structure:
         });
 
         if (!res.ok) {
+          if (res.status === 429) {
+            const waitSeconds = 120;
+            const resumeTime = new Date(Date.now() + waitSeconds * 1000);
+            aiRateLimitState = {
+              isLimited: true,
+              limitedAt: new Date().toLocaleTimeString("th-TH"),
+              resumeAt: resumeTime.toLocaleTimeString("th-TH"),
+              resumeTimestamp: Date.now() + waitSeconds * 1000,
+              provider: `OpenRouter/${model}`,
+            };
+            lastError = new Error(`OpenRouter rate limit hit, cooldown until ${aiRateLimitState.resumeAt}`);
+            break;
+          }
           lastError = new Error(`OpenRouter ${model} returned HTTP ${res.status}`);
           continue;
         }
