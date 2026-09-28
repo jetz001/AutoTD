@@ -18,18 +18,52 @@ function signBitgetRequest(timestamp, method, requestPath, queryString, bodyStr,
   return hmac.digest('base64');
 }
 
+const BITGET_QTY_PRECISION_MAP = {
+  BTCUSDT: 6,
+  ETHUSDT: 4,
+  SOLUSDT: 4,
+  TAOUSDT: 3,
+  ZECUSDT: 3,
+  XRPUSDT: 4,
+  DOGEUSDT: 4,
+  ADAUSDT: 3,
+  NEARUSDT: 2,
+  SUIUSDT: 2,
+  BGBUSDT: 4,
+  AVAXUSDT: 3,
+  LINKUSDT: 3,
+  DOTUSDT: 2,
+  BNBUSDT: 3,
+};
+
 function getCoinPrecision(symbol) {
+  if (BITGET_QTY_PRECISION_MAP[symbol]) return BITGET_QTY_PRECISION_MAP[symbol];
   if (symbol.includes('BTC')) return 6;
-  if (symbol.includes('ETH') || symbol.includes('SOL') || symbol.includes('TAO')) return 4;
-  if (symbol.includes('BGB')) return 4;
-  if (symbol.includes('MOODENG') || symbol.includes('NS')) return 2;
+  if (symbol.includes('ETH') || symbol.includes('SOL')) return 4;
+  if (symbol.includes('TAO') || symbol.includes('ZEC') || symbol.includes('BNB')) return 3;
+  if (symbol.includes('BGB') || symbol.includes('XRP') || symbol.includes('DOGE')) return 4;
   return 2;
 }
 
 function formatCoinAmount(amount, symbol) {
-  const precision = getCoinPrecision(symbol);
-  const factor = Math.pow(10, precision);
-  const truncated = Math.floor(amount * factor) / factor;
+  let precision = getCoinPrecision(symbol);
+  let factor = Math.pow(10, precision);
+  let truncated = Math.floor(amount * factor) / factor;
+
+  // Safety guard: If amount > 0 but precision truncated it to 0, dynamically increase precision up to 6
+  if (amount > 0 && truncated === 0) {
+    for (let p = precision + 1; p <= 6; p++) {
+      const f = Math.pow(10, p);
+      const t = Math.floor(amount * f) / f;
+      if (t > 0) {
+        precision = p;
+        factor = f;
+        truncated = t;
+        break;
+      }
+    }
+  }
+
   return truncated.toFixed(precision);
 }
 

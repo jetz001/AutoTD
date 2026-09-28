@@ -1150,19 +1150,53 @@ export async function executeSpotBuyTranche(
   }
 }
 
+const BITGET_QTY_PRECISION_MAP: Record<string, number> = {
+  BTCUSDT: 6,
+  ETHUSDT: 4,
+  SOLUSDT: 4,
+  TAOUSDT: 3,
+  ZECUSDT: 3,
+  XRPUSDT: 4,
+  DOGEUSDT: 4,
+  ADAUSDT: 3,
+  NEARUSDT: 2,
+  SUIUSDT: 2,
+  BGBUSDT: 4,
+  AVAXUSDT: 3,
+  LINKUSDT: 3,
+  DOTUSDT: 2,
+  BNBUSDT: 3,
+};
+
 export function getCoinPrecision(symbol: string): number {
+  if (BITGET_QTY_PRECISION_MAP[symbol]) return BITGET_QTY_PRECISION_MAP[symbol];
   if (symbol.includes('BTC')) return 6;
-  if (symbol.includes('ETH') || symbol.includes('SOL') || symbol.includes('TAO')) return 4;
-  if (symbol.includes('BGB')) return 4;
-  if (symbol.includes('MOODENG') || symbol.includes('NS')) return 2;
+  if (symbol.includes('ETH') || symbol.includes('SOL')) return 4;
+  if (symbol.includes('TAO') || symbol.includes('ZEC') || symbol.includes('BNB')) return 3;
+  if (symbol.includes('BGB') || symbol.includes('XRP') || symbol.includes('DOGE')) return 4;
   return 2;
 }
 
 export function formatCoinAmount(amount: number, symbol: string): string {
-  const precision = getCoinPrecision(symbol);
-  const factor = Math.pow(10, precision);
-  // Truncate (floor) to prevent exceeding actual available balance on Bitget
-  const truncated = Math.floor(amount * factor) / factor;
+  let precision = getCoinPrecision(symbol);
+  let factor = Math.pow(10, precision);
+  let truncated = Math.floor(amount * factor) / factor;
+
+  // Safety guard: If amount > 0 but precision truncated it to 0 (e.g. holding 0.0059 of a high-value coin),
+  // dynamically increase precision up to 6 so sell order is never 0.00
+  if (amount > 0 && truncated === 0) {
+    for (let p = precision + 1; p <= 6; p++) {
+      const f = Math.pow(10, p);
+      const t = Math.floor(amount * f) / f;
+      if (t > 0) {
+        precision = p;
+        factor = f;
+        truncated = t;
+        break;
+      }
+    }
+  }
+
   return truncated.toFixed(precision);
 }
 
@@ -1184,8 +1218,17 @@ export async function executeSpotSell(
 
   // If in Real Live Trading mode, submit to Bitget
   if (config && !config.isPaperTrading) {
-    // Format precision dynamically with truncation
+    // Format precision dynamically with truncation and safety guard
     const sellSize = formatCoinAmount(h.totalAmount, symbol);
+    if (parseFloat(sellSize) <= 0) {
+      return {
+        success: false,
+        message: `🚨 จำนวนเหรียญ ${symbol} น้อยเกินไป (${h.totalAmount}) ไม่สามารถส่งคำสั่งขายได้`,
+        realizedPnl: 0,
+        updatedHoldings: holdings,
+      };
+    }
+
     const orderRes = await executeRealBitgetOrder(
       {
         symbol,
@@ -1206,9 +1249,11 @@ export async function executeSpotSell(
     }
   }
 
-  const totalReturnUsdt = h.totalAmount * currentPrice;
+  // Use live price if passed, otherwise fall back to holding currentPrice or avgCostPrice
+  const effectivePrice = currentPrice > 0 ? currentPrice : (h.currentPrice > 0 ? h.currentPrice : h.avgCostPrice);
+  const totalReturnUsdt = h.totalAmount * effectivePrice;
   const realizedPnl = totalReturnUsdt - h.totalInvestedUsdt;
-  const pnlPct = ((currentPrice - h.avgCostPrice) / h.avgCostPrice) * 100;
+  const pnlPct = h.avgCostPrice > 0 ? ((effectivePrice - h.avgCostPrice) / h.avgCostPrice) * 100 : 0;
 
   // Remove from holdings
   holdings.splice(idx, 1);
@@ -1228,7 +1273,7 @@ export async function executeSpotSell(
   const modeTag = config && !config.isPaperTrading ? '🔥[REAL LIVE] ' : '';
   const pnlSign = realizedPnl >= 0 ? '+' : '';
   const actionText = isCutLoss ? '🚨 CUT LOSS' : '🎯 TAKE PROFIT';
-  const msg = `${modeTag}${actionText} ${symbol} @ $${currentPrice}: กำไรสุทธิ ${pnlSign}$${realizedPnl.toFixed(2)} (${pnlSign}${pnlPct.toFixed(2)}%) คืน USDT เรียบร้อยแล้ว`;
+  const msg = `${modeTag}${actionText} ${symbol} @ $${effectivePrice}: กำไรสุทธิ ${pnlSign}$${realizedPnl.toFixed(2)} (${pnlSign}${pnlPct.toFixed(2)}%) คืน USDT เรียบร้อยแล้ว`;
 
   return {
     success: true,
@@ -1275,14 +1320,34 @@ export async function executeRebalanceRotation(
   entryPrice: number,
   config: BitgetConfig
 ): Promise<{ success: boolean; message: string; updatedHoldings: SpotHolding[] }> {
-  const sellRes = await executeSpotSell(exitSymbol, 0, false, config);
+  const isPaper = config ? (config.isPaperTrading ?? true) : true;
+  const holdings = loadSpotHoldings(isPaper);
+  const exitHolding = holdings.find(h => h.symbol === exitSymbol);
+  const exitPrice = exitHolding?.currentPrice && exitHolding.currentPrice > 0 ? exitHolding.currentPrice : (exitHolding?.avgCostPrice || 0);
+
+  // 1. Sell the exit symbol first
+  const sellRes = await executeSpotSell(exitSymbol, exitPrice, false, config);
+  if (!sellRes.success) {
+    return {
+      success: false,
+      message: `🚨 Rebalance ไม่สำเร็จ (ขาย ${exitSymbol} ไม่ได้): ${sellRes.message}`,
+      updatedHoldings: holdings,
+    };
+  }
+
+  // 2. In Live mode, wait 1.2s for Bitget wallet balance settlement
+  if (!isPaper) {
+    await new Promise(r => setTimeout(r, 1200));
+  }
+
+  // 3. Buy the new opportunity
   const buyRes = await executeSpotBuyTranche(entrySymbol, entryPrice, 500, config);
 
-  const msg = `🔄 REBALANCE ROTATION: ปิดเหรียญนิ่ง ${exitSymbol} เสมอตัว -> ย้ายทุนเข้าโอกาสทอง ${entrySymbol} [1/${config.maxTranches}] @ $${entryPrice} ทันที`;
+  const msg = `🔄 REBALANCE ROTATION: ปิดเหรียญ ${exitSymbol} เรียบร้อย -> ย้ายเงินทุนเข้าซื้อ ${entrySymbol} [1/${config.maxTranches}] @ $${entryPrice} สำเร็จ`;
 
   return {
     success: buyRes.success,
-    message: msg,
+    message: buyRes.success ? msg : `ปิดเหรียญ ${exitSymbol} แล้ว แต่ซื้อ ${entrySymbol} ไม่สำเร็จ: ${buyRes.message}`,
     updatedHoldings: buyRes.updatedHoldings,
   };
 }

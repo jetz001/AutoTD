@@ -372,20 +372,24 @@ export function CryptoPageClient() {
                     const weakest = findWeakestHolding(updatedHoldings)
                     if (weakest && weakest.symbol !== decision.symbol && Math.abs(weakest.pnlPercent) < 2.5) {
                       const rebRes = await executeRebalanceRotation(weakest.symbol, decision.symbol, decision.price, config)
-                      setHoldings(rebRes.updatedHoldings)
-                      setActionAlert(`🔄 [AUTO REBALANCE] ${rebRes.message}`)
-                      setTimeout(() => setActionAlert(null), 6000)
+                      if (rebRes.success) {
+                        setHoldings(rebRes.updatedHoldings)
+                        setActionAlert(`🔄 [AUTO REBALANCE] ${rebRes.message}`)
+                        setTimeout(() => setActionAlert(null), 6000)
 
-                      const rebLog = {
-                        id: Date.now().toString(),
-                        time: new Date().toLocaleTimeString(),
-                        action: "🔄 [AUTO REBALANCE]",
-                        symbol: `${weakest.symbol} ➜ ${decision.symbol}`,
-                        note: `เงินสดไม่พอ ($${availableCash.toFixed(2)}) สลับตัวถืออัตโนมัติ: ปิดเหรียญนิ่ง ${weakest.symbol} (PnL ${weakest.pnlPercent.toFixed(1)}%) ดึงเงินสดเข้าสะสม ${decision.symbol}`,
-                        color: "#a855f7",
+                        const rebLog = {
+                          id: Date.now().toString(),
+                          time: new Date().toLocaleTimeString(),
+                          action: "🔄 [AUTO REBALANCE]",
+                          symbol: `${weakest.symbol} ➜ ${decision.symbol}`,
+                          note: `เงินสดไม่พอ ($${availableCash.toFixed(2)}) สลับตัวถืออัตโนมัติ: ปิดเหรียญนิ่ง ${weakest.symbol} (PnL ${weakest.pnlPercent.toFixed(1)}%) ดึงเงินสดเข้าสะสม ${decision.symbol}`,
+                          color: "#a855f7",
+                        }
+                        saveQuantLogs([rebLog, ...loadQuantLogs(config.isPaperTrading)], config.isPaperTrading)
+                        return
+                      } else {
+                        console.warn("Auto Rebalance attempted but could not execute:", rebRes.message)
                       }
-                      saveQuantLogs([rebLog, ...loadQuantLogs(config.isPaperTrading)], config.isPaperTrading)
-                      return
                     }
                   }
 
