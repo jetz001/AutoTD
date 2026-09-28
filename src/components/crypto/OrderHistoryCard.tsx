@@ -15,6 +15,7 @@ import {
   XCircle,
   Clock,
   Trash2,
+  RotateCcw,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -34,7 +35,7 @@ import {
   type BitgetConfig,
   type BitgetHistoryOrder,
 } from "@/services/bitgetSpot"
-import { loadQuantLogs } from "@/services/quantEngine"
+import { loadQuantLogs, clearAllQuantLogs, resetAllTradingData } from "@/services/quantEngine"
 
 interface Props {
   config: BitgetConfig
@@ -84,7 +85,7 @@ export function OrderHistoryCard({ config, quantLogs }: Props) {
 
   // Filtered Quant Logs
   const filteredQuantLogs = React.useMemo(() => {
-    const logs = quantLogs && quantLogs.length > 0 ? quantLogs : loadQuantLogs(config.isPaperTrading)
+    const logs = Array.isArray(quantLogs) ? quantLogs : loadQuantLogs(config.isPaperTrading)
     return logs.filter((log) => {
       const matchSearch =
         !searchQuery ||
@@ -136,23 +137,19 @@ export function OrderHistoryCard({ config, quantLogs }: Props) {
     URL.revokeObjectURL(url)
   }
 
-  function handleClearLogs() {
+  async function handleClearLogs(fullReset = false) {
     if (typeof window !== "undefined") {
       const modeText = config.isPaperTrading ? "โหมดจำลอง (Paper)" : "โหมดเทรดจริง (Live)"
-      if (confirm(`ต้องการล้างประวัติบันทึกการตัดสินใจของ ${modeText} ทั้งหมดใช่หรือไม่?`)) {
-        if (config.isPaperTrading) {
-          localStorage.removeItem("bitget_quant_paper_logs_v2")
-          localStorage.removeItem("bitget_quant_logs_v1")
+      const confirmMsg = fullReset
+        ? "⚠️ ยืนยันเคลียนับใหม่ทั้งหมด?\n- ล้างประวัติบันทึก Quant AI ทุกเครื่อง\n- รีเซ็ตเหรียญจำลองในพอร์ต\n- รีเซ็ตยอดเงินทุนจำลองเป็น $10,000 USDT\n(ซิงค์เคลียทันทีบน Cloudflare D1 ทุกอุปกรณ์)"
+        : `ต้องการล้างประวัติบันทึกการตัดสินใจของ ${modeText} ทั้งหมด (ซิงค์ D1 ทุกเครื่อง) ใช่หรือไม่?`
+      if (confirm(confirmMsg)) {
+        if (fullReset) {
+          await resetAllTradingData()
         } else {
-          localStorage.removeItem("bitget_quant_live_logs_v2")
+          await clearAllQuantLogs(config.isPaperTrading)
         }
-        fetch("/api/config", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(config.isPaperTrading ? { quantLogs: [] } : { liveLogs: [] }),
-        }).finally(() => {
-          window.location.reload()
-        })
+        window.location.reload()
       }
     }
   }
@@ -208,16 +205,29 @@ export function OrderHistoryCard({ config, quantLogs }: Props) {
           </Button>
 
           {activeTab === "quant" && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleClearLogs}
-              className="h-8 text-xs gap-1.5 text-rose-500 hover:text-rose-600 hover:bg-rose-500/10 border-rose-500/20"
-              title="ล้างประวัติบันทึก Quant AI เก่าทั้งหมด"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">ล้างประวัติ</span>
-            </Button>
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleClearLogs(false)}
+                className="h-8 text-xs gap-1.5 text-rose-500 hover:text-rose-600 hover:bg-rose-500/10 border-rose-500/20"
+                title="ล้างประวัติบันทึก Quant AI (ซิงค์ D1 ทุกเครื่อง)"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">ล้างประวัติ</span>
+              </Button>
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleClearLogs(true)}
+                className="h-8 text-xs gap-1.5 text-amber-500 hover:text-amber-600 hover:bg-amber-500/10 border-amber-500/20"
+                title="เคลียนับใหม่ทั้งหมด รีเซ็ตพอร์ตและบันทึกสู่เริ่มต้น ($10,000 USDT) ทุกเครื่องผ่าน Cloudflare D1"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">เคลียนับใหม่</span>
+              </Button>
+            </>
           )}
         </div>
       </CardHeader>

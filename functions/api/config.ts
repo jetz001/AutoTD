@@ -187,6 +187,33 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       openrouterApiKey: body.openrouterApiKey || currentSaved.openrouterApiKey || baseDefaults.openrouterApiKey,
     };
 
+    if (Array.isArray(body.quantLogs)) merged.quantLogs = body.quantLogs;
+    if (Array.isArray(body.liveLogs)) merged.liveLogs = body.liveLogs;
+    if (Array.isArray(body.liveQuantLogs)) merged.liveQuantLogs = body.liveQuantLogs;
+    if (Array.isArray(body.holdings)) merged.holdings = body.holdings;
+    if (Array.isArray(body.liveHoldings)) merged.liveHoldings = body.liveHoldings;
+
+    if (body.clearLogs || body.resetAll) {
+      merged.liveLogs = [];
+      merged.quantLogs = [];
+      merged.liveQuantLogs = [];
+      if (body.resetAll) {
+        merged.holdings = [];
+        merged.liveHoldings = [];
+        merged.paperBalance = 10000;
+      }
+      if (env.DB) {
+        try {
+          await env.DB.prepare("DELETE FROM quant_logs").run();
+          if (body.resetAll) {
+            await env.DB.prepare("DELETE FROM holdings").run();
+          }
+        } catch (delErr) {
+          console.warn("D1 clean warning:", delErr);
+        }
+      }
+    }
+
     memoryConfigCache = merged;
     lastCacheReadTime = Date.now();
 
@@ -197,22 +224,24 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           "INSERT INTO config (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP"
         ).bind("user_config", JSON.stringify(merged)).run();
 
-        // If logs were sent, also archive into quant_logs table
-        const logsToInsert = Array.isArray(body.liveLogs) ? body.liveLogs : Array.isArray(body.quantLogs) ? body.quantLogs : [];
-        if (logsToInsert.length > 0) {
-          const latest = logsToInsert[0];
-          if (latest && latest.id) {
-            await env.DB.prepare(
-              "INSERT OR IGNORE INTO quant_logs (id, time, action, symbol, note, color, is_paper) VALUES (?, ?, ?, ?, ?, ?, ?)"
-            ).bind(
-              latest.id,
-              latest.time || "",
-              latest.action || "",
-              latest.symbol || "",
-              latest.note || "",
-              latest.color || "",
-              merged.isPaperTrading ? 1 : 0
-            ).run();
+        // If logs were sent and not clearing, also archive into quant_logs table
+        if (!body.clearLogs && !body.resetAll) {
+          const logsToInsert = Array.isArray(body.liveLogs) ? body.liveLogs : Array.isArray(body.quantLogs) ? body.quantLogs : [];
+          if (logsToInsert.length > 0) {
+            const latest = logsToInsert[0];
+            if (latest && latest.id) {
+              await env.DB.prepare(
+                "INSERT OR IGNORE INTO quant_logs (id, time, action, symbol, note, color, is_paper) VALUES (?, ?, ?, ?, ?, ?, ?)"
+              ).bind(
+                latest.id,
+                latest.time || "",
+                latest.action || "",
+                latest.symbol || "",
+                latest.note || "",
+                latest.color || "",
+                merged.isPaperTrading ? 1 : 0
+              ).run();
+            }
           }
         }
       } catch (d1Err) {

@@ -66,42 +66,86 @@ export function loadQuantLogs(isPaper = true): Array<{ id: string; time: string;
   if (!s && isPaper) {
     s = localStorage.getItem(STORAGE_KEY_QUANT_LOGS);
   }
-  if (s) {
+  if (s !== null) {
     try {
       const parsed = JSON.parse(s);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
+        if (parsed.length === 0) return [];
         // Filter out legacy mock logs
         const cleaned = parsed.filter((log: any) => 
           !log.note?.includes('15m RSI 38.4') && 
           !log.note?.includes('176.40') &&
           !log.note?.includes('3.8% เหนือราคาเฉลี่ย')
         );
-        if (cleaned.length > 0) return cleaned;
+        return cleaned;
       }
     } catch {}
   }
-  return [
-    {
-      id: 'init-1',
-      time: new Date().toLocaleTimeString(),
-      action: 'SYSTEM READY',
-      symbol: isPaper ? 'PAPER BOT' : 'BITGET LIVE',
-      note: isPaper
-        ? 'โหมดจำลอง (Paper Trading) พร้อมทำงาน - รอสัญญาณ Dip in Uptrend'
-        : 'โหมดเทรดจริง (Live Bitget Spot) พร้อมทำงาน - ซิงค์ยอดเงินจริงจากกระเป๋า Bitget',
-      color: '#10b981',
-    },
-  ];
+  return [];
 }
 
 export function saveQuantLogs(logs: Array<{ id: string; time: string; action: string; symbol: string; note: string; color: string }>, isPaper = true) {
   if (typeof window !== 'undefined') {
     const key = isPaper ? STORAGE_KEY_PAPER_LOGS : STORAGE_KEY_LIVE_LOGS;
-    const sliced = logs.slice(0, 20);
+    const sliced = logs.slice(0, 30);
     localStorage.setItem(key, JSON.stringify(sliced));
     if (isPaper) {
       localStorage.setItem(STORAGE_KEY_QUANT_LOGS, JSON.stringify(sliced));
     }
+    // Asynchronously push to Cloudflare D1 via /api/config so all devices are synced
+    fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(isPaper ? { quantLogs: sliced } : { liveLogs: sliced, liveQuantLogs: sliced }),
+    }).catch(() => {});
+  }
+}
+
+export async function clearAllQuantLogs(isPaper = true) {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(STORAGE_KEY_PAPER_LOGS, JSON.stringify([]));
+    localStorage.setItem(STORAGE_KEY_QUANT_LOGS, JSON.stringify([]));
+    localStorage.setItem(STORAGE_KEY_LIVE_LOGS, JSON.stringify([]));
+    try {
+      await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clearLogs: true,
+          quantLogs: [],
+          liveLogs: [],
+          liveQuantLogs: [],
+        }),
+      });
+    } catch {}
+  }
+}
+
+export async function resetAllTradingData() {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(STORAGE_KEY_PAPER_LOGS, JSON.stringify([]));
+    localStorage.setItem(STORAGE_KEY_QUANT_LOGS, JSON.stringify([]));
+    localStorage.setItem(STORAGE_KEY_LIVE_LOGS, JSON.stringify([]));
+    localStorage.setItem('bitget_spot_holdings_v1', JSON.stringify([]));
+    localStorage.setItem('bitget_spot_paper_holdings_v2', JSON.stringify([]));
+    localStorage.setItem('bitget_spot_live_holdings_v2', JSON.stringify([]));
+    localStorage.setItem('bitget_spot_paper_balance_v1', '10000');
+    localStorage.removeItem('bitget_spot_cooldown_v1');
+    try {
+      await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          resetAll: true,
+          paperBalance: 10000,
+          holdings: [],
+          liveHoldings: [],
+          quantLogs: [],
+          liveLogs: [],
+          liveQuantLogs: [],
+        }),
+      });
+    } catch {}
   }
 }
 

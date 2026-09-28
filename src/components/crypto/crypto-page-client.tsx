@@ -100,12 +100,12 @@ export function CryptoPageClient() {
 
         if (targetMode) {
           // In Paper Mode: Sync paper portfolio and paper balance
-          const localHoldings = loadSpotHoldings(true)
-          if (Array.isArray(synced.holdings) && synced.holdings.length > 0) {
+          if (Array.isArray(synced.holdings)) {
             saveSpotHoldings(synced.holdings, true)
             setHoldings(synced.holdings)
-          } else if (localHoldings.length > 0) {
-            setHoldings(localHoldings)
+          } else {
+            const localHoldings = loadSpotHoldings(true)
+            if (localHoldings.length > 0) setHoldings(localHoldings)
           }
 
           if (typeof synced.paperBalance === "number" && synced.paperBalance > 0) {
@@ -114,38 +114,24 @@ export function CryptoPageClient() {
           }
 
           if (Array.isArray(synced.quantLogs)) {
-            if (synced.quantLogs.length === 0) {
-              setQuantState((prev) => ({ ...prev, recentLogs: [] }))
-            } else {
-              const localLogs = loadQuantLogs(true)
-              if (localLogs.length <= 1) {
-                saveQuantLogs(synced.quantLogs, true)
-                setQuantState((prev) => ({ ...prev, recentLogs: synced.quantLogs }))
-              }
-            }
+            saveQuantLogs(synced.quantLogs, true)
+            setQuantState((prev) => ({ ...prev, recentLogs: synced.quantLogs }))
           }
         } else {
           // In Live Mode: Load cached live holdings first for instant UI, then sync genuine Bitget Spot assets
           const liveHoldings = loadSpotHoldings(false)
           setHoldings(liveHoldings)
-          let liveLogs = loadQuantLogs(false)
-          if (liveLogs.length === 0) {
-            liveLogs = [
-              {
-                id: "live_init",
-                time: new Date().toLocaleTimeString("th-TH"),
-                action: "🔥 [LIVE] พอร์ตจริง SPOT",
-                symbol: "BITGET",
-                note: "เชื่อมต่อพอร์ต Bitget Spot สำเร็จเรียบร้อย พร้อมระบบคำนวณ DCA และคัทลอส",
-                color: "#10b981",
-              },
-            ]
-            saveQuantLogs(liveLogs, false)
-          }
+          const cloudLiveLogs = Array.isArray(synced.liveLogs)
+            ? synced.liveLogs
+            : Array.isArray(synced.liveQuantLogs)
+            ? synced.liveQuantLogs
+            : loadQuantLogs(false)
+          
+          saveQuantLogs(cloudLiveLogs, false)
           setQuantState((prev) => ({
             ...prev,
             cashReserveUsdt: 0,
-            recentLogs: liveLogs,
+            recentLogs: cloudLiveLogs,
             activeCoinsCount: liveHoldings.length,
           }))
 
