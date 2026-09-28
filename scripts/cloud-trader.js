@@ -376,7 +376,33 @@ async function runAutopilotCycle() {
 
   for (const h of holdings) {
     const match = liveHoldingsConfig.find(lh => lh.symbol === h.symbol);
-    const avgCost = match && match.avgCostPrice > 0 ? match.avgCostPrice : 0;
+    let avgCost = match && match.avgCostPrice > 0 ? match.avgCostPrice : 0;
+
+    if (avgCost <= 0) {
+      try {
+        const timestamp = Date.now().toString();
+        const requestPath = '/api/v2/spot/trade/history-orders';
+        const queryParams = `symbol=${h.symbol}&limit=10`;
+        const sign = signBitgetRequest(timestamp, 'GET', requestPath, queryParams, '', config.secretKey);
+        const res = await fetch(`${BITGET_HOST}${requestPath}?${queryParams}`, {
+          headers: {
+            'ACCESS-KEY': config.apiKey,
+            'ACCESS-SIGN': sign,
+            'ACCESS-TIMESTAMP': timestamp,
+            'ACCESS-PASSPHRASE': config.passphrase,
+            'Content-Type': 'application/json',
+            'locale': 'en-US'
+          }
+        });
+        const json = await res.json();
+        if (json.code === '00000' && Array.isArray(json.data)) {
+          const buyOrder = json.data.find(o => o.side === 'buy' && (o.status === 'filled' || o.status === 'partially_filled'));
+          if (buyOrder && parseFloat(buyOrder.priceAvg || buyOrder.price || '0') > 0) {
+            avgCost = parseFloat(buyOrder.priceAvg || buyOrder.price);
+          }
+        }
+      } catch (err) {}
+    }
 
     if (avgCost > 0) {
       const pnlPct = ((h.currentPrice - avgCost) / avgCost) * 100;

@@ -120,6 +120,26 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     groqApiKey: savedConfig?.groqApiKey || baseDefaults.groqApiKey,
   };
 
+  // Sync with D1 holdings table to ensure true average purchase costs are always populated
+  if (env.DB && (!merged.liveHoldings || merged.liveHoldings.length === 0)) {
+    try {
+      const { results } = await env.DB.prepare("SELECT * FROM holdings WHERE is_paper = 0").all();
+      if (results && results.length > 0) {
+        merged.liveHoldings = results.map((r: any) => ({
+          symbol: r.symbol,
+          baseCoin: r.base_coin,
+          totalAmount: r.total_amount,
+          tranchesCount: r.tranches_count,
+          avgCostPrice: r.avg_cost_price,
+          totalInvestedUsdt: r.total_invested_usdt,
+          isPaper: false,
+        }));
+      }
+    } catch (holdingsErr) {
+      console.warn("D1 holdings read warning:", holdingsErr);
+    }
+  }
+
   return Response.json(
     {
       code: "00000",
@@ -241,6 +261,24 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
                 latest.color || "",
                 merged.isPaperTrading ? 1 : 0
               ).run();
+            }
+          }
+
+          // If liveHoldings were sent, also archive/sync into holdings table in D1
+          if (Array.isArray(body.liveHoldings) && body.liveHoldings.length > 0) {
+            for (const h of body.liveHoldings) {
+              if (h.symbol && h.avgCostPrice > 0) {
+                await env.DB.prepare(
+                  "INSERT INTO holdings (symbol, base_coin, total_amount, tranches_count, avg_cost_price, total_invested_usdt, is_paper, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP) ON CONFLICT(symbol) DO UPDATE SET total_amount = excluded.total_amount, avg_cost_price = excluded.avg_cost_price, total_invested_usdt = excluded.total_invested_usdt, updated_at = CURRENT_TIMESTAMP"
+                ).bind(
+                  h.symbol,
+                  h.baseCoin || "",
+                  h.totalAmount || 0,
+                  h.tranchesCount || 1,
+                  h.avgCostPrice,
+                  h.totalInvestedUsdt || 0
+                ).run();
+              }
             }
           }
         }

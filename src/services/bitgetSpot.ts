@@ -808,6 +808,18 @@ export async function fetchRealBitgetHoldings(
     }
   } catch {}
 
+  const localLive = loadSpotHoldings(false);
+  const costMap: Record<string, { avgCostPrice: number; tranchesCount: number; history: any[] }> = {};
+  for (const h of localLive) {
+    if (h.symbol && h.avgCostPrice > 0) {
+      costMap[h.symbol] = {
+        avgCostPrice: h.avgCostPrice,
+        tranchesCount: h.tranchesCount || 1,
+        history: h.history || [],
+      };
+    }
+  }
+
   for (const a of assets) {
     if (a.coin === 'USDT') continue;
     const sym = `${a.coin}USDT`;
@@ -817,22 +829,62 @@ export async function fetchRealBitgetHoldings(
 
     // Include real assets with value >= $0.10 USD
     if (val >= 0.10) {
+      let avgCost = costMap[sym]?.avgCostPrice || 0;
+      let tranchesCount = costMap[sym]?.tranchesCount || 1;
+      let history = costMap[sym]?.history || [];
+
+      // If avgCost is missing or matches market price exactly, fetch real filled buy order from Bitget!
+      if ((avgCost <= 0 || avgCost === price) && config?.apiKey) {
+        try {
+          const orders = await fetchRealBitgetOrderHistory(config, sym);
+          const buyOrders = orders.filter(o => o.side.toLowerCase() === 'buy' && (o.status === 'filled' || o.status === 'partially_filled'));
+          if (buyOrders.length > 0) {
+            const lastBuy = buyOrders[0];
+            const p = parseFloat(lastBuy.priceAvg || lastBuy.price || '0');
+            if (p > 0) {
+              avgCost = p;
+              history = [{ price: p, amount: a.available, time: lastBuy.cTime ? new Date(Number(lastBuy.cTime)).toLocaleTimeString('th-TH') : 'Bitget Spot' }];
+            }
+          }
+        } catch {}
+      }
+
+      if (avgCost <= 0) {
+        avgCost = price;
+      }
+
+      const totalInvested = a.available * avgCost;
+      const unPnl = (price - avgCost) * a.available;
+      const pnlPct = avgCost > 0 ? ((price - avgCost) / avgCost) * 100 : 0;
+      const tpTarget = config?.takeProfitPercent || 3.5;
+      const slTarget = config?.cutLossPercent || 5.0;
+
       realHoldings.push({
         symbol: sym,
         baseCoin: a.coin,
         totalAmount: a.available,
-        tranchesCount: 1,
-        avgCostPrice: price,
-        totalInvestedUsdt: val,
+        tranchesCount,
+        avgCostPrice: parseFloat(avgCost.toFixed(4)),
+        totalInvestedUsdt: parseFloat(totalInvested.toFixed(2)),
         currentPrice: price,
-        unrealizedPnlUsdt: 0,
-        pnlPercent: 0,
-        takeProfitPrice: parseFloat((price * 1.05).toFixed(4)),
-        cutLossPrice: parseFloat((price * 0.95).toFixed(4)),
+        unrealizedPnlUsdt: parseFloat(unPnl.toFixed(2)),
+        pnlPercent: parseFloat(pnlPct.toFixed(2)),
+        takeProfitPrice: parseFloat((avgCost * (1 + tpTarget / 100)).toFixed(4)),
+        cutLossPrice: parseFloat((avgCost * (1 - slTarget / 100)).toFixed(4)),
         isPaper: false,
-        history: [{ price, amount: a.available, time: 'Bitget Spot' }],
+        history: history.length > 0 ? history : [{ price: avgCost, amount: a.available, time: 'Bitget Spot' }],
       });
     }
+  }
+
+  // Persist liveHoldings with true average costs to local storage & Cloudflare D1
+  if (typeof window !== 'undefined' && realHoldings.length > 0) {
+    saveSpotHoldings(realHoldings, false);
+    fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ liveHoldings: realHoldings }),
+    }).catch(() => {});
   }
 
   return {

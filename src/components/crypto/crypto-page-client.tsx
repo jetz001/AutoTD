@@ -118,9 +118,15 @@ export function CryptoPageClient() {
             setQuantState((prev) => ({ ...prev, recentLogs: synced.quantLogs }))
           }
         } else {
-          // In Live Mode: Load cached live holdings first for instant UI, then sync genuine Bitget Spot assets
-          const liveHoldings = loadSpotHoldings(false)
-          setHoldings(liveHoldings)
+          // In Live Mode: Load cached live holdings from D1 first for instant accurate UI, then sync genuine Bitget Spot assets
+          const initialHoldings = Array.isArray(synced.liveHoldings) && synced.liveHoldings.length > 0
+            ? synced.liveHoldings
+            : loadSpotHoldings(false)
+          setHoldings(initialHoldings)
+          if (initialHoldings.length > 0) {
+            saveSpotHoldings(initialHoldings, false)
+          }
+
           const cloudLiveLogs = Array.isArray(synced.liveLogs)
             ? synced.liveLogs
             : Array.isArray(synced.liveQuantLogs)
@@ -132,11 +138,11 @@ export function CryptoPageClient() {
             ...prev,
             cashReserveUsdt: 0,
             recentLogs: cloudLiveLogs,
-            activeCoinsCount: liveHoldings.length,
+            activeCoinsCount: initialHoldings.length,
           }))
 
           try {
-            const realData = await fetchRealBitgetHoldings(merged)
+            const realData = await fetchRealBitgetHoldings(merged, priceMap)
             if (realData.holdings.length > 0) {
               setHoldings(realData.holdings)
               saveSpotHoldings(realData.holdings, false)
