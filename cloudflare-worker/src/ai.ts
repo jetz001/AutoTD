@@ -27,8 +27,9 @@ export interface MarketContext {
 
 export async function askTradingAgent(
   context: MarketContext,
-  provider: "openai" | "claude" | "gemini" | "openrouter" | "mock",
-  apiKey?: string
+  provider: "openai" | "claude" | "gemini" | "openrouter" | "groq" | "mock",
+  apiKey?: string,
+  groqKey?: string
 ): Promise<AIDecision> {
   const prompt = `
 You are an autonomous quant crypto trader AI operating on Bitget exchange.
@@ -139,8 +140,47 @@ Respond ONLY with a valid JSON object matching this schema:
     return JSON.parse(jsonMatch ? jsonMatch[0] : text);
   }
 
-  // 5. OpenRouter Provider with 6-Tier Fallback Loop (ป้องกัน Rate limit / Model ยกเลิก)
-  if (provider === "openrouter") {
+  // 5. Groq Provider (Primary High-Speed LPU Inference with OpenRouter Fallback)
+  const activeGroqKey = groqKey || (provider === "groq" ? apiKey : undefined);
+  if (provider === "groq" || (activeGroqKey && provider === "openrouter")) {
+    const groqCandidateModels = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "allam-2-7b"];
+    for (const gModel of groqCandidateModels) {
+      try {
+        const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${activeGroqKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: gModel,
+            max_tokens: 300,
+            messages: [{ role: "user", content: prompt }],
+            response_format: { type: "json_object" },
+            temperature: 0.2
+          })
+        });
+
+        if (res.ok) {
+          const data = await res.json() as any;
+          const content = data.choices?.[0]?.message?.content;
+          if (content) {
+            const jsonMatch = content.match(/\{[\s\S]*\}/);
+            const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : content);
+            return {
+              ...parsed,
+              reason: `[Groq: ${gModel}] ${parsed.reason || ""}`
+            };
+          }
+        }
+      } catch (gErr: any) {
+        console.warn(`[Groq Warning] ${gModel} failed: ${gErr.message}`);
+      }
+    }
+  }
+
+  // 6. OpenRouter Provider with Multi-Model Fallback Loop
+  if (provider === "openrouter" || provider === "groq") {
     const modelsToTry = context.customModelList && context.customModelList.length > 0
       ? context.customModelList
       : await fetchLatest6FreeModels(apiKey);
@@ -168,7 +208,7 @@ Respond ONLY with a valid JSON object matching this schema:
         });
 
         if (!res.ok) {
-          console.warn(`[OpenRouter Fallback] Model ${currentModel} returned HTTP ${res.status}, trying next in 6 candidates...`);
+          console.warn(`[OpenRouter Fallback] Model ${currentModel} returned HTTP ${res.status}, trying next in candidates...`);
           lastError = new Error(`HTTP ${res.status} from ${currentModel}`);
           continue;
         }
@@ -191,7 +231,7 @@ Respond ONLY with a valid JSON object matching this schema:
       }
     }
 
-    throw new Error(`All 6 OpenRouter free models failed fallback: ${lastError?.message}`);
+    throw new Error(`All Groq & OpenRouter AI free models failed fallback: ${lastError?.message}`);
   }
 
   throw new Error(`Unsupported AI provider: ${provider}`);

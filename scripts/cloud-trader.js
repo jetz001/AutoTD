@@ -465,24 +465,91 @@ async function runAutopilotCycle() {
     if (candidates.length > 0) {
       const best = candidates[0];
       console.log(`Found top candidate: ${best.symbol} with score ${best.totalScore}/100 @ $${best.price}`);
-      
-      const buyRes = await placeBitgetOrder({
-        symbol: best.symbol,
-        side: 'buy',
-        orderType: 'market',
-        size: '10'
-      }, config);
 
-      if (buyRes.code === '00000') {
-        const buyLog = {
-          id: Date.now().toString(),
-          time: new Date().toLocaleTimeString('th-TH'),
-          action: '🚀 [CLOUD AUTO-BUY]',
+      // Consult Groq (Primary) & OpenRouter (Fallback) AI Sentinel
+      let aiDecision = { action: 'BUY_SPOT', confidence: 85, reason: 'Quant Heuristics Score >= 80' };
+      const groqKey = config.groqApiKey || process.env.GROQ_API_KEY;
+      const orKey = config.openrouterApiKey || process.env.OPENROUTER_API_KEY;
+
+      const prompt = `Evaluate Dip-in-Uptrend buy for ${best.symbol} @ $${best.price} (24h Change: ${best.change.toFixed(2)}%, Quant Score: ${best.totalScore}/100, Volume: $${best.vol.toLocaleString()}). Respond ONLY in valid JSON: {"action":"BUY_SPOT"|"HOLD","confidence":number,"reason":"short explanation"}`;
+
+      let aiApproved = true;
+      let aiModelUsed = 'quant_score';
+
+      if (groqKey) {
+        try {
+          const gRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'qwen/qwen3.8-27b',
+              max_tokens: 300,
+              messages: [{ role: 'user', content: prompt }],
+              response_format: { type: 'json_object' }
+            })
+          });
+          if (gRes.ok) {
+            const gData = await gRes.json();
+            const text = gData.choices?.[0]?.message?.content;
+            if (text) {
+              const parsed = JSON.parse(text);
+              aiDecision = parsed;
+              aiModelUsed = 'groq/qwen3.8-27b';
+              if (parsed.action === 'HOLD' && parsed.confidence >= 70) aiApproved = false;
+            }
+          }
+        } catch (e) {
+          console.warn('Groq cloud sentinel warning:', e.message);
+        }
+      }
+
+      if (aiModelUsed === 'quant_score' && orKey) {
+        try {
+          const oRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${orKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'qwen/qwen3.8-27b:free',
+              messages: [{ role: 'user', content: prompt }],
+              response_format: { type: 'json_object' }
+            })
+          });
+          if (oRes.ok) {
+            const oData = await oRes.json();
+            const text = oData.choices?.[0]?.message?.content;
+            if (text) {
+              const parsed = JSON.parse(text);
+              aiDecision = parsed;
+              aiModelUsed = 'openrouter/qwen3.8-27b:free';
+              if (parsed.action === 'HOLD' && parsed.confidence >= 70) aiApproved = false;
+            }
+          }
+        } catch (e) {
+          console.warn('OpenRouter cloud sentinel warning:', e.message);
+        }
+      }
+
+      if (aiApproved) {
+        const buyRes = await placeBitgetOrder({
           symbol: best.symbol,
-          note: `ช้อนซื้อ Dip in Uptrend สำเร็จ (Score ${best.totalScore}/100) มูลค่า $10 USDT @ $${best.price}`,
-          color: '#10b981'
-        };
-        newLogs.push(buyLog);
+          side: 'buy',
+          orderType: 'market',
+          size: '10'
+        }, config);
+
+        if (buyRes.code === '00000') {
+          const buyLog = {
+            id: Date.now().toString(),
+            time: new Date().toLocaleTimeString('th-TH'),
+            action: '🚀 [CLOUD AUTO-BUY]',
+            symbol: best.symbol,
+            note: `ช้อนซื้อ Dip in Uptrend สำเร็จ (${aiModelUsed} Score ${best.totalScore}/100) มูลค่า $10 USDT @ $${best.price} | เหตุผล: ${aiDecision.reason || 'AI ผ่านเกณฑ์'}`,
+            color: '#10b981'
+          };
+          newLogs.push(buyLog);
+        }
+      } else {
+        console.log(`AI Sentinel vetoed buy for ${best.symbol}: ${aiDecision.reason}`);
       }
     }
   }

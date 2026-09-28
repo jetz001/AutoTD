@@ -14,6 +14,7 @@ export interface Env {
   // AI Secrets
   AI_API_KEY?: string;
   OPENROUTER_API_KEY?: string;
+  GROQ_API_KEY?: string;
 
   // Config vars
   TRADING_MODE?: "SPOT" | "FUTURES" | "BOTH";
@@ -21,7 +22,7 @@ export interface Env {
   MAX_LEVERAGE?: string;
   MAX_RISK_PERCENT?: string;
   PAPER_TRADING?: string;
-  AI_PROVIDER?: "openai" | "claude" | "gemini" | "openrouter" | "mock";
+  AI_PROVIDER?: "openai" | "claude" | "gemini" | "openrouter" | "groq" | "mock";
 }
 
 // In-memory trade journal for live UI display
@@ -95,6 +96,7 @@ export default {
       let apiKey = env.BITGET_API_KEY;
       let secretKey = env.BITGET_SECRET_KEY;
       let aiKey = env.OPENROUTER_API_KEY || env.AI_API_KEY;
+      let groqKey = env.GROQ_API_KEY;
 
       if (env.AUTOTD_KV && (!apiKey || !secretKey)) {
         try {
@@ -104,19 +106,22 @@ export default {
             if (u.apiKey) apiKey = u.apiKey;
             if (u.secretKey) secretKey = u.secretKey;
             if (u.openrouterApiKey) aiKey = u.openrouterApiKey;
+            if (u.groqApiKey) groqKey = u.groqApiKey;
           }
         } catch {}
       }
 
       const bitgetConfigured = Boolean(apiKey && secretKey);
-      const aiConfigured = Boolean(aiKey);
+      const aiConfigured = Boolean(groqKey || aiKey);
       return Response.json({
         status: "RUNNING",
         mode: env.TRADING_MODE || "SPOT",
         paperTrading: env.PAPER_TRADING !== "false",
-        aiProvider: env.AI_PROVIDER || (aiConfigured ? "openrouter" : "mock"),
+        aiProvider: env.AI_PROVIDER || (groqKey ? "groq" : aiConfigured ? "openrouter" : "mock"),
         bitgetConfigured,
         aiConfigured,
+        hasGroq: Boolean(groqKey),
+        hasOpenRouter: Boolean(aiKey),
         freeModels: cachedFreeModels,
         logs: liveLogs.slice(-20).reverse(),
       }, { headers: corsHeaders });
@@ -318,6 +323,7 @@ async function executeTradingCycle(triggerSource: string, env: Env, configOverri
   let secretKey = env.BITGET_SECRET_KEY;
   let passphrase = env.BITGET_PASSPHRASE;
   let aiKey = env.OPENROUTER_API_KEY || env.AI_API_KEY;
+  let groqKey = env.GROQ_API_KEY;
 
   if (env.AUTOTD_KV && (!apiKey || !secretKey)) {
     try {
@@ -328,6 +334,7 @@ async function executeTradingCycle(triggerSource: string, env: Env, configOverri
         if (u.secretKey) secretKey = u.secretKey;
         if (u.passphrase) passphrase = u.passphrase;
         if (u.openrouterApiKey) aiKey = u.openrouterApiKey;
+        if (u.groqApiKey) groqKey = u.groqApiKey;
       }
     } catch {}
   }
@@ -440,11 +447,11 @@ async function executeTradingCycle(triggerSource: string, env: Env, configOverri
     customModelList: cachedFreeModels,
   };
 
-  // 1. ให้ AI วิเคราะห์ & ตัดสินใจ (พร้อมระบบ Fallback 6 โมเดล)
+  // 1. ให้ AI วิเคราะห์ & ตัดสินใจ (พร้อมระบบ Fallback: Groq -> OpenRouter)
   if (lastModelDiscoveryTime === 0 && aiKey) {
     refreshFreeModelsDaily(aiKey).catch(() => {});
   }
-  const decision: AIDecision = await askTradingAgent(context, provider, aiKey);
+  const decision: AIDecision = await askTradingAgent(context, provider, aiKey, groqKey);
 
   // 2. ส่ง Order ไป Bitget (ถ้าไม่ใช่ Paper trading และไม่ใช่ HOLD)
   let orderResult = null;

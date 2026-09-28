@@ -27,6 +27,7 @@ const CORE_SETTINGS_KEYS = [
   "secretKey",
   "passphrase",
   "openrouterApiKey",
+  "groqApiKey",
   "isPaperTrading",
   "autoPilotEnabled",
   "tranchePercent",
@@ -49,6 +50,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     secretKey: env.BITGET_SECRET_KEY || "",
     passphrase: env.BITGET_PASSPHRASE || "",
     openrouterApiKey: env.OPENROUTER_API_KEY || "",
+    groqApiKey: (env as any).GROQ_API_KEY || "",
     isPaperTrading: false, // Live trading mode default
     autoPilotEnabled: true,
     tranchePercent: 20,
@@ -115,6 +117,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     secretKey: savedConfig?.secretKey || baseDefaults.secretKey,
     passphrase: savedConfig?.passphrase || baseDefaults.passphrase,
     openrouterApiKey: savedConfig?.openrouterApiKey || baseDefaults.openrouterApiKey,
+    groqApiKey: savedConfig?.groqApiKey || baseDefaults.groqApiKey,
   };
 
   return Response.json(
@@ -135,6 +138,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     secretKey: env.BITGET_SECRET_KEY || "",
     passphrase: env.BITGET_PASSPHRASE || "",
     openrouterApiKey: env.OPENROUTER_API_KEY || "",
+    groqApiKey: (env as any).GROQ_API_KEY || "",
     isPaperTrading: false,
     autoPilotEnabled: true,
     tranchePercent: 20,

@@ -9,6 +9,7 @@ export interface BitgetConfig {
   secretKey: string;
   passphrase: string;
   openrouterApiKey?: string;
+  groqApiKey?: string;
   isPaperTrading: boolean;
   autoPilotEnabled: boolean;  // Master Auto-Pilot switch (ON/OFF)
   tranchePercent: number;     // e.g. 20 = 20% of available USDT per tranche
@@ -62,6 +63,7 @@ export function loadBitgetConfig(): BitgetConfig {
     secretKey: '',
     passphrase: '',
     openrouterApiKey: '',
+    groqApiKey: '',
     isPaperTrading: true, // Default to PAPER TRADING for safety across all devices
     autoPilotEnabled: true, // FULL BOT AUTO-PILOT ON BY DEFAULT
     tranchePercent: 20,     // 20% of available cash per tranche
@@ -287,6 +289,9 @@ export async function consultOpenRouterAgent(
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
+    if (config?.groqApiKey) {
+      headers['x-groq-key'] = config.groqApiKey;
+    }
     if (config?.openrouterApiKey) {
       headers['x-openrouter-key'] = config.openrouterApiKey;
     }

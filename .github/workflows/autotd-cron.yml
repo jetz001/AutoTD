@@ -43,4 +43,6 @@ jobs:
           INPUT_ACTION: ${{ github.event.inputs.action || 'cycle' }}
           INPUT_SYMBOL: ${{ github.event.inputs.symbol || '' }}
           INPUT_AMOUNT: ${{ github.event.inputs.amount || '' }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: node scripts/cloud-trader.js

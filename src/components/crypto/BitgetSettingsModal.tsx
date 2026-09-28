@@ -214,14 +214,41 @@ export function BitgetSettingsModal({ isOpen, onClose, onSave }: Props) {
             </div>
           </div>
 
-          {/* OpenRouter AI Agent Credentials */}
+          {/* Groq AI Agent (Primary) */}
+          <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 font-semibold text-foreground text-xs">
+                <Sliders className="h-3.5 w-3.5 text-amber-400" />
+                <span>Groq LPU AI (ระบบประมวลผลความเร็วสูง - ตัวหลัก)</span>
+              </div>
+              <span className="rounded bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.5 text-[9px] font-bold text-amber-400">
+                ⚡ PRIMARY
+              </span>
+            </div>
+            <div>
+              <label className="text-[11px] text-muted-foreground">
+                Groq API Key (ฟรี ความเร็ว 500+ tok/s: Qwen 2.5 32B, LLaMA 3.3 70B)
+              </label>
+              <Input
+                type="password"
+                placeholder="gsk_... (หรือใช้คีย์อัตโนมัติ)"
+                value={cfg.groqApiKey || ""}
+                onChange={(e) => setCfg({ ...cfg, groqApiKey: e.target.value.trim() })}
+                className="mt-1 h-8 text-xs font-mono"
+              />
+            </div>
+          </div>
+
+          {/* OpenRouter AI Agent Credentials (Secondary Fallback) */}
           <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-3 space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 font-semibold text-foreground text-xs">
                 <Sliders className="h-3.5 w-3.5 text-purple-400" />
-                <span>OpenRouter AI Agent (วิเคราะห์ตัดสินใจ)</span>
+                <span>OpenRouter AI Agent (สำรอง Fallback)</span>
               </div>
-              <span className="text-[10px] text-muted-foreground">ระบบ 6 โมเดลฟรี Auto-Fallback</span>
+              <span className="rounded bg-purple-500/10 border border-purple-500/30 px-1.5 py-0.5 text-[9px] font-bold text-purple-400">
+                🔄 FALLBACK
+              </span>
             </div>
             <div>
               <label className="text-[11px] text-muted-foreground">

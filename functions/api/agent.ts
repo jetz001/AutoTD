@@ -1,10 +1,18 @@
-// Cloudflare Pages Function: OpenRouter AI Autonomous Trading Agent
-// Supports 6-Tier Auto-Fallback Free Models Loop with Zero-Token-Cost Guarantee
+// Cloudflare Pages Function: Groq & OpenRouter AI Autonomous Trading Agent
+// Tier 1: Groq High-Speed LPU Models (Primary)
+// Tier 2: OpenRouter Free Models Auto-Fallback Loop (Secondary)
 
 interface Env {
+  GROQ_API_KEY?: string;
   OPENROUTER_API_KEY?: string;
   AI_API_KEY?: string;
 }
+
+export const GROQ_MODELS = [
+  "qwen/qwen3.8-27b",
+  "openai/gpt-oss-120b",
+  "allam-2-7b",
+];
 
 export const DEFAULT_FREE_MODELS = [
   "inclusionai/ling-3.0-flash-fin:free",
@@ -69,7 +77,7 @@ export async function getLiveFreeModels(apiKey?: string): Promise<string[]> {
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, x-openrouter-key, Authorization",
+  "Access-Control-Allow-Headers": "Content-Type, x-groq-key, x-openrouter-key, Authorization",
 };
 
 export const onRequest: PagesFunction<Env> = async (context) => {
@@ -79,23 +87,31 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  if (request.method === "GET") {
-    const aiKey =
-      request.headers.get("x-openrouter-key") ||
-      (env as any).OPENROUTER_API_KEY ||
-      (env as any).AI_API_KEY ||
-      (env as any).OPENROUTER_KEY ||
-      (env as any).OPENROUTER ||
-      (env as any).OR_API_KEY ||
-      (env as any).AGENT_KEY;
+  const groqKey =
+    request.headers.get("x-groq-key") ||
+    (env as any).GROQ_API_KEY ||
+    (env as any).GROQ_KEY ||
+    (env as any).AI_GROQ_KEY;
 
-    const liveModels = await getLiveFreeModels(aiKey);
+  const openrouterKey =
+    request.headers.get("x-openrouter-key") ||
+    (env as any).OPENROUTER_API_KEY ||
+    (env as any).AI_API_KEY ||
+    (env as any).OPENROUTER_KEY ||
+    (env as any).OPENROUTER ||
+    (env as any).OR_API_KEY ||
+    (env as any).AGENT_KEY;
+
+  if (request.method === "GET") {
+    const liveModels = await getLiveFreeModels(openrouterKey);
     return Response.json(
       {
         status: "READY",
-        hasKey: Boolean(aiKey),
-        provider: "openrouter",
-        availableFreeModels: liveModels,
+        primaryProvider: "groq",
+        hasGroqKey: Boolean(groqKey),
+        hasOpenRouterKey: Boolean(openrouterKey),
+        groqModels: GROQ_MODELS,
+        fallbackFreeModels: liveModels,
       },
       { headers: corsHeaders }
     );
@@ -115,21 +131,14 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     );
   }
 
-  const aiKey =
-    request.headers.get("x-openrouter-key") ||
-    body.apiKey ||
-    (env as any).OPENROUTER_API_KEY ||
-    (env as any).AI_API_KEY ||
-    (env as any).OPENROUTER_KEY ||
-    (env as any).OPENROUTER ||
-    (env as any).OR_API_KEY ||
-    (env as any).AGENT_KEY;
+  const effectiveGroqKey = body.groqApiKey || groqKey;
+  const effectiveOpenrouterKey = body.openrouterApiKey || body.apiKey || openrouterKey;
 
-  if (!aiKey) {
+  if (!effectiveGroqKey && !effectiveOpenrouterKey) {
     return Response.json(
       {
         code: "40001",
-        msg: "Missing OpenRouter API Key (Configure OPENROUTER_API_KEY in Cloudflare Pages Secrets or pass x-openrouter-key)",
+        msg: "Missing AI Key: configure GROQ_API_KEY or OPENROUTER_API_KEY",
       },
       { status: 400, headers: corsHeaders }
     );
@@ -171,64 +180,136 @@ Respond ONLY with valid JSON in this exact structure:
 `;
 
   let lastError: any = null;
-  const modelsToTry = await getLiveFreeModels(aiKey);
 
-  for (let i = 0; i < modelsToTry.length; i++) {
-    const model = modelsToTry[i];
-    try {
-      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${aiKey}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": "https://autotd.pages.dev",
-          "X-Title": "AutoTD Quant Bot",
-        },
-        body: JSON.stringify({
-          model,
-          models: modelsToTry.slice(i, i + 3),
-          messages: [{ role: "user", content: prompt }],
-          response_format: { type: "json_object" },
-          temperature: 0.2,
-        }),
-      });
-
-      if (!res.ok) {
-        lastError = new Error(`Model ${model} returned HTTP ${res.status}`);
-        continue;
-      }
-
-      const data = (await res.json()) as any;
-      const content = data.choices?.[0]?.message?.content;
-      if (!content) {
-        lastError = new Error(`Empty response from ${model}`);
-        continue;
-      }
-
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : content);
-
-      return Response.json(
-        {
-          code: "00000",
-          msg: "success",
-          data: {
-            action: parsed.action || "HOLD",
-            confidence: Number(parsed.confidence) || 75,
-            reason: parsed.reason || "AI evaluated market conditions",
-            modelUsed: model,
-            symbol,
-            price: currentPrice,
+  // ==========================================
+  // TIER 1: GROQ HIGH-SPEED ULTRA-LOW-LATENCY INFERENCE (PRIMARY)
+  // ==========================================
+  if (effectiveGroqKey) {
+    for (const model of GROQ_MODELS) {
+      try {
+        const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${effectiveGroqKey}`,
+            "Content-Type": "application/json",
           },
-        },
-        { headers: corsHeaders }
-      );
-    } catch (err: any) {
-      lastError = err;
+          body: JSON.stringify({
+            model,
+            max_tokens: 300,
+            messages: [{ role: "user", content: prompt }],
+            response_format: { type: "json_object" },
+            temperature: 0.2,
+          }),
+        });
+
+        if (!res.ok) {
+          lastError = new Error(`Groq ${model} returned HTTP ${res.status}`);
+          continue;
+        }
+
+        const data = (await res.json()) as any;
+        const content = data.choices?.[0]?.message?.content;
+        if (!content) {
+          lastError = new Error(`Empty response from Groq ${model}`);
+          continue;
+        }
+
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : content);
+
+        return Response.json(
+          {
+            code: "00000",
+            msg: "success",
+            provider: "groq",
+            data: {
+              action: parsed.action || "HOLD",
+              confidence: Number(parsed.confidence) || 85,
+              reason: parsed.reason || "Groq AI evaluated dip quality and risk",
+              modelUsed: `groq/${model}`,
+              symbol,
+              price: currentPrice,
+              stopLossPrice: parsed.stopLossPrice,
+              takeProfitPrice: parsed.takeProfitPrice,
+            },
+          },
+          { headers: corsHeaders }
+        );
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`[AutoTD] Groq ${model} warning, trying next:`, err.message);
+      }
     }
   }
 
-  // If all free models fail or rate limit, return graceful fallback decision based on Quant score
+  // ==========================================
+  // TIER 2: OPENROUTER MULTI-MODEL FALLBACK LOOP (SECONDARY)
+  // ==========================================
+  if (effectiveOpenrouterKey) {
+    const modelsToTry = await getLiveFreeModels(effectiveOpenrouterKey);
+
+    for (let i = 0; i < modelsToTry.length; i++) {
+      const model = modelsToTry[i];
+      try {
+        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${effectiveOpenrouterKey}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://autotd.pages.dev",
+            "X-Title": "AutoTD Quant Bot",
+          },
+          body: JSON.stringify({
+            model,
+            models: modelsToTry.slice(i, i + 3),
+            messages: [{ role: "user", content: prompt }],
+            response_format: { type: "json_object" },
+            temperature: 0.2,
+          }),
+        });
+
+        if (!res.ok) {
+          lastError = new Error(`OpenRouter ${model} returned HTTP ${res.status}`);
+          continue;
+        }
+
+        const data = (await res.json()) as any;
+        const content = data.choices?.[0]?.message?.content;
+        if (!content) {
+          lastError = new Error(`Empty response from OpenRouter ${model}`);
+          continue;
+        }
+
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : content);
+
+        return Response.json(
+          {
+            code: "00000",
+            msg: "success",
+            provider: "openrouter",
+            data: {
+              action: parsed.action || "HOLD",
+              confidence: Number(parsed.confidence) || 75,
+              reason: parsed.reason || "OpenRouter AI evaluated market conditions",
+              modelUsed: `openrouter/${model}`,
+              symbol,
+              price: currentPrice,
+              stopLossPrice: parsed.stopLossPrice,
+              takeProfitPrice: parsed.takeProfitPrice,
+            },
+          },
+          { headers: corsHeaders }
+        );
+      } catch (err: any) {
+        lastError = err;
+      }
+    }
+  }
+
+  // ==========================================
+  // TIER 3: HEURISTIC QUANT RULE ENGINE SAFEGUARD
+  // ==========================================
   return Response.json(
     {
       code: "00000",
@@ -240,7 +321,7 @@ Respond ONLY with valid JSON in this exact structure:
           aiScore >= 80
             ? "Dip in Uptrend เข้าเงื่อนไขสะสมไม้แรก"
             : "สภาวะตลาดยังไม่พร้อมเข้าซื้อ"
-        } (${lastError?.message || "OpenRouter fallback"})`,
+        } (${lastError?.message || "AI fallback"})`,
         modelUsed: "heuristic_quant",
         symbol,
         price: currentPrice,
