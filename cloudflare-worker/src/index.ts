@@ -55,13 +55,23 @@ export default {
       ctx.waitUntil(
         Promise.allSettled([
           executeTradingCycle("CRON_INTERVAL", env),
+          // 1. AutoTD (Spot Trading)
           fetch("https://autotd.pages.dev/api/cloud-trade", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ action: "cycle" }),
           }).then((r) => r.json()).then((res) => {
-            console.log("AutoTD cloud dispatch:", JSON.stringify(res));
-          }).catch((e: any) => console.warn("AutoTD cloud dispatch notice:", e?.message)),
+            console.log("AutoTD (Spot) cloud dispatch:", JSON.stringify(res));
+          }).catch((e: any) => console.warn("AutoTD (Spot) cloud dispatch notice:", e?.message)),
+
+          // 2. AutoTDFex (Futures Trading)
+          fetch("https://autotdfex.pages.dev/api/cloud-trade", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "cycle" }),
+          }).then((r) => r.json()).then((res) => {
+            console.log("AutoTDFex (Futures) cloud dispatch:", JSON.stringify(res));
+          }).catch((e: any) => console.warn("AutoTDFex (Futures) cloud dispatch notice:", e?.message)),
         ]).catch((err: any) => {
           console.warn("Cron interval executed with notice:", err?.message || err);
         })
@@ -96,8 +106,20 @@ export default {
     if (url.pathname === "/api/wake" && request.method === "POST") {
       const body = await request.json().catch(() => ({})) as any;
       const customReason = body.reason || "MANUAL_TRIGGER_FROM_DASHBOARD";
-      const result = await executeTradingCycle(customReason, env, body.configOverride);
-      return Response.json({ success: true, trigger: "manual", result }, { headers: corsHeaders });
+      const [result, autoTdRes, autoTdFexRes] = await Promise.all([
+        executeTradingCycle(customReason, env, body.configOverride),
+        fetch("https://autotd.pages.dev/api/cloud-trade", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "cycle", reason: customReason }),
+        }).then((r) => r.json()).catch((e) => ({ error: e.message })),
+        fetch("https://autotdfex.pages.dev/api/cloud-trade", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "cycle", reason: customReason }),
+        }).then((r) => r.json()).catch((e) => ({ error: e.message })),
+      ]);
+      return Response.json({ success: true, trigger: "manual", result, autoTdRes, autoTdFexRes }, { headers: corsHeaders });
     }
 
     // API: ดูสถานะปัจจุบัน & ประวัติการตัดสินใจของ AI
