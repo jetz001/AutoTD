@@ -406,9 +406,10 @@ async function runAutopilotCycle() {
   // ==========================================
   const tpTarget = config.takeProfitPercent || 3.5;
   const slTarget = config.cutLossPercent || 5.0;
-  const liveHoldingsConfig = Array.isArray(config.liveHoldings) ? config.liveHoldings : [];
+  let liveHoldingsConfig = Array.isArray(config.liveHoldings) ? [...config.liveHoldings] : [];
 
-  for (const h of holdings) {
+  for (let i = 0; i < holdings.length; i++) {
+    const h = holdings[i];
     const match = liveHoldingsConfig.find(lh => lh.symbol === h.symbol);
     let avgCost = match && match.avgCostPrice > 0 ? match.avgCostPrice : 0;
 
@@ -440,6 +441,8 @@ async function runAutopilotCycle() {
 
     if (avgCost > 0) {
       const pnlPct = ((h.currentPrice - avgCost) / avgCost) * 100;
+      h.pnlPct = pnlPct;
+      h.avgCost = avgCost;
       console.log(`Holding ${h.symbol}: Price $${h.currentPrice}, AvgCost $${avgCost}, PnL: ${pnlPct.toFixed(2)}% (TP: +${tpTarget}%, SL: -${slTarget}%)`);
 
       // 5.1 Take Profit
@@ -459,9 +462,14 @@ async function runAutopilotCycle() {
             time: new Date().toLocaleTimeString('th-TH'),
             action: '🎯 [CLOUD AUTO-TAKE PROFIT]',
             symbol: h.symbol,
-            note: `ล็อคกำไรสำเร็จ @ $${h.currentPrice} (+${pnlPct.toFixed(2)}%) ดึง USDT กลับกระเป๋า Spot`,
+            note: `ล็อคกำไรสำเร็จ @ $${h.currentPrice} (+${pnlPct.toFixed(2)}%) คืน USDT กลับกระเป๋า Spot`,
             color: '#10b981'
           });
+          liveHoldingsConfig = liveHoldingsConfig.filter(lh => lh.symbol !== h.symbol);
+          usdtAvailable += (h.amount * h.currentPrice);
+          holdings.splice(i, 1);
+          i--;
+          continue;
         }
       }
       // 5.2 Cut Loss
@@ -484,6 +492,132 @@ async function runAutopilotCycle() {
             note: `คัทลอสรักษาทุน @ $${h.currentPrice} (${pnlPct.toFixed(2)}%)`,
             color: '#ef4444'
           });
+          liveHoldingsConfig = liveHoldingsConfig.filter(lh => lh.symbol !== h.symbol);
+          usdtAvailable += (h.amount * h.currentPrice);
+          holdings.splice(i, 1);
+          i--;
+          continue;
+        }
+      }
+    }
+  }
+
+  // ==========================================
+  // 5.5 DCA ACCUMULATION ENGINE (AUTONOMOUS TRANCHES 2, 3, 4)
+  // ==========================================
+  const maxTranches = config.maxTranches || 4;
+  const tranchePercent = config.tranchePercent || 20;
+
+  for (const h of holdings) {
+    const match = liveHoldingsConfig.find(lh => lh.symbol === h.symbol);
+    const avgCost = h.avgCost || (match && match.avgCostPrice > 0 ? match.avgCostPrice : 0);
+    const currentTranches = match?.tranchesCount || 1;
+
+    if (avgCost > 0 && currentTranches < maxTranches) {
+      const dropPct = ((h.currentPrice - avgCost) / avgCost) * 100;
+      // Trigger DCA when price is down by 3.0% or more from average cost
+      if (dropPct <= -3.0) {
+        console.log(`[CLOUD DCA] ${h.symbol} dipped ${dropPct.toFixed(2)}% (Tranche ${currentTranches}/${maxTranches}). Checking budget...`);
+        const maxSpendable = Math.max(0, Math.floor((usdtAvailable - 0.05) * 100) / 100);
+        let dcaBudget = Math.max(5, Math.floor((usdtAvailable * (tranchePercent / 100)) * 100) / 100);
+        dcaBudget = Math.min(dcaBudget, maxSpendable);
+
+        if (dcaBudget >= 5) {
+          console.log(`[CLOUD DCA] Executing DCA buy for ${h.symbol} with budget $${dcaBudget.toFixed(2)} USDT...`);
+          const buyRes = await placeBitgetOrder({
+            symbol: h.symbol,
+            side: 'buy',
+            orderType: 'market',
+            size: String(dcaBudget.toFixed(2))
+          }, config);
+
+          if (buyRes.code === '00000') {
+            const coinsBought = dcaBudget / h.currentPrice;
+            const oldAmount = h.amount;
+            const oldInvested = match?.totalInvestedUsdt || (oldAmount * avgCost);
+            const newAmount = oldAmount + coinsBought;
+            const newInvested = oldInvested + dcaBudget;
+            const newAvgCost = newInvested / newAmount;
+            const nextTranche = currentTranches + 1;
+
+            if (match) {
+              match.avgCostPrice = parseFloat(newAvgCost.toFixed(4));
+              match.totalAmount = newAmount;
+              match.totalInvestedUsdt = newInvested;
+              match.tranchesCount = nextTranche;
+            } else {
+              liveHoldingsConfig.push({
+                symbol: h.symbol,
+                baseCoin: h.baseCoin,
+                totalAmount: newAmount,
+                tranchesCount: nextTranche,
+                avgCostPrice: parseFloat(newAvgCost.toFixed(4)),
+                totalInvestedUsdt: newInvested,
+                isPaper: false
+              });
+            }
+
+            usdtAvailable = Math.max(0, usdtAvailable - dcaBudget);
+            newLogs.push({
+              id: Date.now().toString(),
+              time: new Date().toLocaleTimeString('th-TH'),
+              action: '🔥⚡ [CLOUD AUTO DCA] BUY',
+              symbol: h.symbol,
+              note: `✓ [REAL BITGET] ช้อนซื้อ ${h.symbol} ไม้ที่ ${nextTranche}/${maxTranches} @ $${h.currentPrice} (ทุนเฉลี่ยใหม่: $${newAvgCost.toFixed(4)}) | ย่อลงมา ${dropPct.toFixed(1)}% ดึงต้นทุนเฉลี่ยลงสำเร็จ`,
+              color: '#0ea5e9'
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // ==========================================
+  // 5.6 AUTO REBALANCE ROTATION (WHEN CASH < $5)
+  // ==========================================
+  if (usdtAvailable < 5 && config.autoRebalanceEnabled && holdings.length > 0) {
+    // Find stagnant holding (|pnl| < 2.5%)
+    const stagnant = holdings.find(h => typeof h.pnlPct === 'number' && Math.abs(h.pnlPct) < 2.5);
+    // Find if another holding needs DCA urgently
+    const urgentDip = holdings.find(h => h.symbol !== stagnant?.symbol && typeof h.pnlPct === 'number' && h.pnlPct <= -3.5);
+
+    if (stagnant && urgentDip) {
+      console.log(`[CLOUD REBALANCE] Rotating stagnant ${stagnant.symbol} to fund dip in ${urgentDip.symbol}...`);
+      const sellSize = formatCoinAmount(stagnant.amount, stagnant.symbol);
+      const sellRes = await placeBitgetOrder({
+        symbol: stagnant.symbol,
+        side: 'sell',
+        orderType: 'market',
+        size: sellSize
+      }, config);
+
+      if (sellRes.code === '00000') {
+        liveHoldingsConfig = liveHoldingsConfig.filter(lh => lh.symbol !== stagnant.symbol);
+        const freedUsdt = stagnant.amount * stagnant.currentPrice;
+        usdtAvailable += freedUsdt;
+
+        await new Promise(r => setTimeout(r, 1500));
+
+        // Re-buy urgent dip
+        const maxSpend = Math.max(0, Math.floor((usdtAvailable - 0.05) * 100) / 100);
+        if (maxSpend >= 5) {
+          const buyRes = await placeBitgetOrder({
+            symbol: urgentDip.symbol,
+            side: 'buy',
+            orderType: 'market',
+            size: String(maxSpend.toFixed(2))
+          }, config);
+
+          if (buyRes.code === '00000') {
+            newLogs.push({
+              id: Date.now().toString(),
+              time: new Date().toLocaleTimeString('th-TH'),
+              action: '🔄 [CLOUD AUTO REBALANCE]',
+              symbol: `${stagnant.symbol} ➜ ${urgentDip.symbol}`,
+              note: `สลับเงินทุนอัตโนมัติ: ปิดเหรียญนิ่ง ${stagnant.symbol} ดึงเงินสด $${maxSpend.toFixed(2)} เข้าสะสม ${urgentDip.symbol} ที่กำลังย่อตัวสำเร็จ`,
+              color: '#a855f7'
+            });
+          }
         }
       }
     }
@@ -492,7 +626,7 @@ async function runAutopilotCycle() {
   // ==========================================
   // 6. CANDIDATE SCREENING & AUTO-BUY (DIP IN UPTREND)
   // ==========================================
-  if (ACTION_INPUT === 'cycle' && usdtAvailable >= 10 && holdings.length < (config.maxCoins || 4)) {
+  if (ACTION_INPUT === 'cycle' && usdtAvailable >= 5 && holdings.length < (config.maxCoins || 4)) {
     console.log(`Cash available ($${usdtAvailable.toFixed(2)}) & slots open (${holdings.length}/${config.maxCoins || 4}). Scanning candidates...`);
     const STABLECOINS = ['USDC', 'USDGO', 'FDUSD', 'USDE', 'DAI', 'TUSD', 'EUR', 'BUSD'];
     const REAL_R_CRYPTO = ['RENDERUSDT', 'ROSEUSDT', 'RUNEUSDT', 'RAYUSDT', 'REQUSDT'];
@@ -643,6 +777,17 @@ async function runAutopilotCycle() {
         }, config);
 
         if (buyRes.code === '00000') {
+          const coinsBought = buySize / best.price;
+          liveHoldingsConfig.push({
+            symbol: best.symbol,
+            baseCoin: best.symbol.replace('USDT', ''),
+            totalAmount: coinsBought,
+            tranchesCount: 1,
+            avgCostPrice: best.price,
+            totalInvestedUsdt: buySize,
+            isPaper: false
+          });
+
           const buyLog = {
             id: Date.now().toString(),
             time: new Date().toLocaleTimeString('th-TH'),
@@ -670,13 +815,13 @@ async function runAutopilotCycle() {
     }
   }
 
-  // 7. Push cycle health log update to Cloudflare
+  // 7. Push cycle health log & updated holdings to Cloudflare D1
   const statusLog = {
     id: Date.now().toString(),
     time: new Date().toLocaleTimeString('th-TH'),
     action: '🤖 [CLOUD 24/7] ตรวจสอบพอร์ต',
     symbol: 'AUTOTD',
-    note: `สแกนพอร์ตเรียบร้อย ถือ ${holdings.length}/${config.maxCoins || 4} เหรียญ | USDT ว่าง $${usdtAvailable.toFixed(2)} | ระบบเฝ้าระวังอัตโนมัติ 24 ชม.`,
+    note: `สแกนพอร์ตเรียบร้อย ถือ ${liveHoldingsConfig.length}/${config.maxCoins || 4} เหรียญ | USDT ว่าง $${usdtAvailable.toFixed(2)} | ระบบเฝ้าระวังอัตโนมัติ 24 ชม.`,
     color: '#38bdf8'
   };
 
@@ -686,9 +831,12 @@ async function runAutopilotCycle() {
     await fetch(CLOUD_CONFIG_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ liveLogs: updatedLogs })
+      body: JSON.stringify({
+        liveHoldings: liveHoldingsConfig,
+        liveLogs: updatedLogs
+      })
     });
-    console.log('Pushed cloud health log successfully.');
+    console.log('Pushed cloud health log & holdings to D1 successfully.');
   } catch (syncErr) {
     console.warn('Sync log error:', syncErr.message);
   }

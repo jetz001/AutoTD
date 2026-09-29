@@ -53,7 +53,16 @@ export default {
       ctx.waitUntil(refreshFreeModelsDaily(aiKey).catch((e: any) => console.warn("Discovery notice:", e?.message)));
     } else {
       ctx.waitUntil(
-        executeTradingCycle("CRON_INTERVAL", env).catch((err: any) => {
+        Promise.allSettled([
+          executeTradingCycle("CRON_INTERVAL", env),
+          fetch("https://autotd.pages.dev/api/cloud-trade", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "cycle" }),
+          }).then((r) => r.json()).then((res) => {
+            console.log("AutoTD cloud dispatch:", JSON.stringify(res));
+          }).catch((e: any) => console.warn("AutoTD cloud dispatch notice:", e?.message)),
+        ]).catch((err: any) => {
           console.warn("Cron interval executed with notice:", err?.message || err);
         })
       );
