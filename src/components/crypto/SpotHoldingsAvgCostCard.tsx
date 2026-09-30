@@ -47,6 +47,15 @@ export function SpotHoldingsAvgCostCard({
   const [editMaxHoldMinutes, setEditMaxHoldMinutes] = React.useState<number>(180)
   const [editManualLock, setEditManualLock] = React.useState<boolean>(false)
 
+  // Real-time ticking clock for active countdown
+  const [currentTimestamp, setCurrentTimestamp] = React.useState<number>(() => Date.now())
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTimestamp(Date.now())
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [])
+
   const totalUnrealizedPnl = holdings.reduce((sum, h) => sum + h.unrealizedPnlUsdt, 0)
   const totalActiveInvested = activeHoldings.reduce((sum, h) => sum + h.totalInvestedUsdt, 0)
 
@@ -145,12 +154,22 @@ export function SpotHoldingsAvgCostCard({
                   const isCloseToTp = h.currentPrice >= h.takeProfitPrice
                   const isCloseToSl = h.currentPrice <= h.cutLossPrice
 
-                  // Calculate remaining hold time
-                  const entryTime = h.entryTimestamp || Date.now()
+                  // Calculate live remaining countdown in real-time seconds
+                  const entryTime = h.entryTimestamp || (h.history?.[0]?.time ? new Date(h.history[0].time).getTime() : 0)
                   const maxMinutes = h.maxHoldMinutes || 180
-                  const elapsedMinutes = Math.floor((Date.now() - entryTime) / 60000)
-                  const remainingMinutes = Math.max(0, maxMinutes - elapsedMinutes)
-                  const isTimeExpired = elapsedMinutes >= maxMinutes
+                  const maxDurationMs = maxMinutes * 60 * 1000
+                  const effectiveEntryTime = entryTime > 0 && entryTime <= currentTimestamp ? entryTime : (currentTimestamp - 30000)
+                  const expiryTimestamp = effectiveEntryTime + maxDurationMs
+                  const diffSeconds = Math.floor((expiryTimestamp - currentTimestamp) / 1000)
+                  const remainingSeconds = Math.max(0, diffSeconds)
+                  const isTimeExpired = diffSeconds <= 0
+
+                  const rHours = Math.floor(remainingSeconds / 3600)
+                  const rMins = Math.floor((remainingSeconds % 3600) / 60)
+                  const rSecs = remainingSeconds % 60
+                  const formattedCountdown = rHours > 0
+                    ? `${rHours}ชม. ${String(rMins).padStart(2, "0")}น. ${String(rSecs).padStart(2, "0")}วิ`
+                    : `${String(rMins).padStart(2, "0")}น. ${String(rSecs).padStart(2, "0")}วิ`
 
                   return (
                     <tr
@@ -194,9 +213,9 @@ export function SpotHoldingsAvgCostCard({
                           )}
                         </div>
                         <div className="mt-1 flex items-center gap-1 text-[10px] font-mono">
-                          <Clock className="h-3 w-3 text-muted-foreground" />
-                          <span className={isTimeExpired ? "text-amber-400 font-bold" : "text-muted-foreground"}>
-                            {isTimeExpired ? "ครบกำหนดเวลา (รอหมุน)" : `เหลือ ${remainingMinutes} นาที`}
+                          <Clock className={`h-3 w-3 ${isTimeExpired ? "text-amber-400 animate-bounce" : "text-emerald-400 animate-pulse"}`} />
+                          <span className={isTimeExpired ? "text-amber-400 font-bold" : "text-emerald-400 font-semibold"}>
+                            {isTimeExpired ? "ครบกำหนดเวลา (รอหมุน)" : `⏱️ ${formattedCountdown}`}
                           </span>
                         </div>
                       </td>

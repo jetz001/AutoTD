@@ -629,7 +629,7 @@ export function CryptoPageClient() {
     const actionLabel = isCutLoss ? "คัทลอส" : "ขายทำกำไร"
     if (!confirm(`ยืนยันการ${actionLabel} ${symbol} ทันที 100% ด้วยราคาตลาด?`)) return
 
-    const res = await executeSpotSell(symbol, currentPrice, isCutLoss, config)
+    const res = await executeSpotSell(symbol, currentPrice, isCutLoss, config, holdings)
     setHoldings(res.updatedHoldings)
     setActionAlert(res.message)
     setTimeout(() => setActionAlert(null), 4000)

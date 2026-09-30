@@ -1228,11 +1228,29 @@ export async function executeSpotSell(
   symbol: string,
   currentPrice: number,
   isCutLoss = false,
-  config?: BitgetConfig
+  config?: BitgetConfig,
+  currentHoldings?: SpotHolding[]
 ): Promise<{ success: boolean; message: string; realizedPnl: number; updatedHoldings: SpotHolding[] }> {
   const isPaper = config ? (config.isPaperTrading ?? true) : true;
-  const holdings = loadSpotHoldings(isPaper);
-  const idx = holdings.findIndex(h => h.symbol === symbol);
+  let holdings = loadSpotHoldings(isPaper);
+  let idx = holdings.findIndex(h => h.symbol === symbol);
+
+  // Fallback to active holdings in memory if localStorage hasn't synced yet
+  if (idx === -1 && Array.isArray(currentHoldings) && currentHoldings.length > 0) {
+    holdings = [...currentHoldings];
+    idx = holdings.findIndex(h => h.symbol === symbol);
+  }
+
+  // Fallback to opposite trading mode list if needed
+  if (idx === -1) {
+    const altHoldings = loadSpotHoldings(!isPaper);
+    const altIdx = altHoldings.findIndex(h => h.symbol === symbol);
+    if (altIdx >= 0) {
+      holdings = altHoldings;
+      idx = altIdx;
+    }
+  }
+
   if (idx === -1) {
     return { success: false, message: `ไม่พบเหรียญ ${symbol} ในพอร์ต`, realizedPnl: 0, updatedHoldings: holdings };
   }
@@ -1281,6 +1299,15 @@ export async function executeSpotSell(
   // Remove from holdings
   holdings.splice(idx, 1);
   saveSpotHoldings(holdings, isPaper);
+
+  // Sync removal to Cloudflare D1 immediately
+  fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      [isPaper ? 'holdings' : 'liveHoldings']: holdings,
+    }),
+  }).catch(() => {});
 
   // Return funds to paper balance if paper trading
   if (!config || config.isPaperTrading) {
