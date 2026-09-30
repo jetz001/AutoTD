@@ -127,14 +127,15 @@ export function SpotHoldingsAvgCostCard({
           </div>
         ) : (
           <div className="max-h-[380px] overflow-x-auto overflow-y-auto w-full">
-            <table className="w-full min-w-[550px] border-collapse text-left text-xs">
+            <table className="w-full min-w-[620px] border-collapse text-left text-xs">
               <thead className="sticky top-0 bg-card/95 backdrop-blur-xs border-b z-10 text-muted-foreground text-[11px]">
                 <tr>
-                  <th className="py-2.5 pl-4 pr-2 font-medium">เหรียญ / กลยุทธ์</th>
-                  <th className="py-2.5 px-2 font-medium">ราคาต้นทุน</th>
+                  <th className="py-2.5 pl-4 pr-2 font-medium">เหรียญ / ไม้</th>
+                  <th className="py-2.5 px-2 font-medium">กลยุทธ์ & กรอบเวลา</th>
+                  <th className="py-2.5 px-2 font-medium">ต้นทุนเฉลี่ย</th>
                   <th className="py-2.5 px-2 font-medium">ราคาตลาด</th>
-                  <th className="py-2.5 px-2 font-medium">PnL</th>
-                  <th className="py-2.5 px-2 font-medium">เป้าขาย / จุดคัท</th>
+                  <th className="py-2.5 px-2 font-medium">กำไร/ขาดทุน PnL</th>
+                  <th className="py-2.5 px-2 font-medium">เป้าขาย TP / จุดคัท SL</th>
                   <th className="py-2.5 pr-4 pl-2 font-medium text-right">คำสั่งด่วน</th>
                 </tr>
               </thead>
@@ -157,41 +158,50 @@ export function SpotHoldingsAvgCostCard({
                       onClick={() => onSelectSymbol(h.symbol)}
                       className="cursor-pointer transition-colors hover:bg-muted/40"
                     >
-                      {/* Coin, Tranches, & Strategy Badges */}
+                      {/* 1. Coin Symbol & Amount */}
                       <td className="py-2.5 pl-4 pr-2">
-                        <div className="font-bold text-foreground flex items-center gap-1.5 flex-wrap">
+                        <div className="font-bold text-foreground flex items-center gap-1.5">
                           <span>{h.symbol}</span>
                           <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[9px] font-bold text-primary">
                             {h.tranchesCount}/{config.maxTranches} ไม้
                           </span>
-                          {h.manualLock && (
-                            <span className="rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1 py-0.2 text-[8px] font-bold flex items-center gap-0.5" title="ล็อคป้องกันการขายอัตโนมัติ">
-                              <Lock className="h-2.5 w-2.5" /> ล็อค
+                        </div>
+                        <div className="text-[10px] text-muted-foreground font-mono mt-0.5">
+                          ถือ {h.totalAmount < 1 ? h.totalAmount.toFixed(4) : h.totalAmount.toFixed(2)} (${h.totalInvestedUsdt.toFixed(1)})
+                        </div>
+                      </td>
+
+                      {/* 2. Strategy, Timeframe & Remaining Hold Time Countdown */}
+                      <td className="py-2.5 px-2">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {h.targetTimeframe && (
+                            <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[9px] font-bold text-sky-400 border border-sky-500/30 font-mono">
+                              {h.targetTimeframe}
                             </span>
                           )}
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] font-medium text-foreground">
+                            {h.primaryIndicator ? h.primaryIndicator.replace(/_/g, " ") : "Multi-Indicator"}
+                          </span>
                           {h.breakevenLocked && (
                             <span className="rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1 py-0.2 text-[8px] font-bold flex items-center gap-0.5" title="ขยับ SL บังทุนแล้ว">
                               <ShieldCheck className="h-2.5 w-2.5" /> บังทุน
                             </span>
                           )}
-                        </div>
-
-                        {/* Sub-line: Holding details & Time-Stop */}
-                        <div className="flex items-center gap-2 mt-0.5 text-[10px] text-muted-foreground font-mono flex-wrap">
-                          <span>ถือ {h.totalAmount < 1 ? h.totalAmount.toFixed(4) : h.totalAmount.toFixed(2)} (${h.totalInvestedUsdt.toFixed(1)})</span>
-                          {h.targetTimeframe && (
-                            <span className="text-sky-400 font-sans font-medium">
-                              • {h.targetTimeframe} {h.primaryIndicator ? `(${h.primaryIndicator})` : ""}
+                          {h.manualLock && (
+                            <span className="rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1 py-0.2 text-[8px] font-bold flex items-center gap-0.5" title="ล็อคป้องกันการขายอัตโนมัติ">
+                              <Lock className="h-2.5 w-2.5" /> ล็อค
                             </span>
                           )}
-                          <span className={`flex items-center gap-0.5 ${isTimeExpired ? "text-amber-400 font-bold" : "text-muted-foreground"}`}>
-                            <Clock className="h-2.5 w-2.5" />
-                            {isTimeExpired ? "หมดเวลา (รอ Rebalance)" : `เหลือ ${remainingMinutes} น.`}
+                        </div>
+                        <div className="mt-1 flex items-center gap-1 text-[10px] font-mono">
+                          <Clock className="h-3 w-3 text-muted-foreground" />
+                          <span className={isTimeExpired ? "text-amber-400 font-bold" : "text-muted-foreground"}>
+                            {isTimeExpired ? "ครบกำหนดเวลา (รอหมุน)" : `เหลือ ${remainingMinutes} นาที`}
                           </span>
                         </div>
                       </td>
 
-                      {/* Weighted Average Cost */}
+                      {/* 3. Weighted Average Cost */}
                       <td className="py-2.5 px-2">
                         <div className="font-mono font-bold text-sky-400">
                           ${h.avgCostPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}

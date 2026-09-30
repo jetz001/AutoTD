@@ -921,17 +921,12 @@ export function CryptoPageClient() {
         config={config}
       />
 
-      {/* 2. Quant Multi-Timeframe Confluence Matrix Heatmap */}
-      <QuantMatrixCard
-        screenerMatrix={screenerMatrix}
-        onSelectCoin={(symbol) => setSelectedSymbol(symbol)}
-      />
-
-      {/* 3. Middle Grid: Spot Screener (Left) & Holdings & Avg Cost (Right) */}
+      {/* 2. Middle Grid: Multi-Timeframe Quant Screener (Left) & Holdings Tracker (Right) */}
       <div className="grid grid-cols-12 gap-4">
-        {/* Spot AI Screener */}
+        {/* Unified Multi-Timeframe Quant Screener */}
         <SpotScreenerCard
           tickers={tickers}
+          screenerMatrix={screenerMatrix}
           selectedSymbol={selectedSymbol}
           onSelectSymbol={setSelectedSymbol}
           onBuyTranche={handleBuyTranche}
