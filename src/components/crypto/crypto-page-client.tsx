@@ -470,7 +470,7 @@ export function CryptoPageClient() {
 
                 if (agentDecision) {
                   aiReason = `[AI: ${agentDecision.modelUsed}] ${agentDecision.reason}`
-                  if (agentDecision.action === "HOLD" && agentDecision.confidence < 70) {
+                  if (agentDecision.action === "HOLD") {
                     shouldExecuteBuy = false
                   }
 

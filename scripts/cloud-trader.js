@@ -839,7 +839,7 @@ Respond ONLY in JSON: {"action":"BUY_SPOT"|"HOLD","confidence":number,"reason":"
               const parsed = JSON.parse(text);
               aiDecision = parsed;
               aiModelUsed = 'groq/qwen3.8-27b';
-              if (parsed.action === 'HOLD' && parsed.confidence >= 70) aiApproved = false;
+              if (parsed.action === 'HOLD') aiApproved = false;
             }
           }
         } catch (e) {
@@ -865,7 +865,7 @@ Respond ONLY in JSON: {"action":"BUY_SPOT"|"HOLD","confidence":number,"reason":"
               const parsed = JSON.parse(text);
               aiDecision = parsed;
               aiModelUsed = 'openrouter/qwen3.8-27b:free';
-              if (parsed.action === 'HOLD' && parsed.confidence >= 70) aiApproved = false;
+              if (parsed.action === 'HOLD') aiApproved = false;
             }
           }
         } catch (e) {
