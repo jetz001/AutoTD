@@ -18,6 +18,10 @@ function signBitgetRequest(timestamp, method, requestPath, queryString, bodyStr,
   return hmac.digest('base64');
 }
 
+function getThaiTimeString(date = new Date()) {
+  return date.toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok', hour12: false });
+}
+
 const BITGET_QTY_PRECISION_MAP = {
   BTCUSDT: 6,
   ETHUSDT: 4,
@@ -328,7 +332,8 @@ async function runAutopilotCycle() {
         console.log(`On-demand sell succeeded: orderId=${orderId}`);
         newLogs.push({
           id: Date.now().toString(),
-          time: new Date().toLocaleTimeString('th-TH'),
+          timestamp: Date.now(),
+          time: getThaiTimeString(),
           action: '🎯 [CLOUD SELL] คำสั่งสำเร็จ',
           symbol: targetSym,
           note: `ขายสำเร็จบน Bitget Spot orderId=${orderId}`,
@@ -338,7 +343,8 @@ async function runAutopilotCycle() {
         console.error('On-demand sell failed:', sellRes.code, sellRes.msg);
         newLogs.push({
           id: Date.now().toString(),
-          time: new Date().toLocaleTimeString('th-TH'),
+          timestamp: Date.now(),
+          time: getThaiTimeString(),
           action: '🚨 [CLOUD SELL] ไม่สำเร็จ',
           symbol: targetSym,
           note: `Bitget API (${sellRes.code}): ${sellRes.msg || 'Order failed'}`,
@@ -361,7 +367,8 @@ async function runAutopilotCycle() {
       console.error(`Insufficient USDT balance: $${usdtAvailable.toFixed(2)} (Need at least $5 USDT for Bitget Spot)`);
       newLogs.push({
         id: Date.now().toString(),
-        time: new Date().toLocaleTimeString('th-TH'),
+        timestamp: Date.now(),
+        time: getThaiTimeString(),
         action: '🚨 [CLOUD BUY] ไม่สำเร็จ',
         symbol: targetSym,
         note: `ยอด USDT ใน Bitget Spot มีเพียง $${usdtAvailable.toFixed(2)} ไม่พอสำหรับขั้นต่ำ $5.00 USDT (ต้องเติม USDT ในกระเป๋า Spot)`,
@@ -381,7 +388,8 @@ async function runAutopilotCycle() {
         console.log(`On-demand buy succeeded: orderId=${orderId}`);
         newLogs.push({
           id: Date.now().toString(),
-          time: new Date().toLocaleTimeString('th-TH'),
+          timestamp: Date.now(),
+          time: getThaiTimeString(),
           action: '🚀 [CLOUD BUY] คำสั่งสำเร็จ',
           symbol: targetSym,
           note: `เข้าซื้อสำเร็จบน Bitget Spot orderId=${orderId} มูลค่า $${buySize.toFixed(2)} USDT`,
@@ -391,7 +399,8 @@ async function runAutopilotCycle() {
         console.error('On-demand buy failed:', buyRes.code, buyRes.msg);
         newLogs.push({
           id: Date.now().toString(),
-          time: new Date().toLocaleTimeString('th-TH'),
+          timestamp: Date.now(),
+          time: getThaiTimeString(),
           action: '🚨 [CLOUD BUY] ไม่สำเร็จ',
           symbol: targetSym,
           note: `Bitget API (${buyRes.code}): ${buyRes.msg || 'Order failed'}`,
@@ -459,7 +468,8 @@ async function runAutopilotCycle() {
         if (sellRes.code === '00000') {
           newLogs.push({
             id: Date.now().toString(),
-            time: new Date().toLocaleTimeString('th-TH'),
+            timestamp: Date.now(),
+            time: getThaiTimeString(),
             action: '🎯 [CLOUD AUTO-TAKE PROFIT]',
             symbol: h.symbol,
             note: `ล็อคกำไรสำเร็จ @ $${h.currentPrice} (+${pnlPct.toFixed(2)}%) คืน USDT กลับกระเป๋า Spot`,
@@ -486,7 +496,8 @@ async function runAutopilotCycle() {
         if (sellRes.code === '00000') {
           newLogs.push({
             id: Date.now().toString(),
-            time: new Date().toLocaleTimeString('th-TH'),
+            timestamp: Date.now(),
+            time: getThaiTimeString(),
             action: '🚨 [CLOUD AUTO-CUT LOSS]',
             symbol: h.symbol,
             note: `คัทลอสรักษาทุน @ $${h.currentPrice} (${pnlPct.toFixed(2)}%)`,
@@ -560,7 +571,8 @@ async function runAutopilotCycle() {
             usdtAvailable = Math.max(0, usdtAvailable - dcaBudget);
             newLogs.push({
               id: Date.now().toString(),
-              time: new Date().toLocaleTimeString('th-TH'),
+              timestamp: Date.now(),
+              time: getThaiTimeString(),
               action: '🔥⚡ [CLOUD AUTO DCA] BUY',
               symbol: h.symbol,
               note: `✓ [REAL BITGET] ช้อนซื้อ ${h.symbol} ไม้ที่ ${nextTranche}/${maxTranches} @ $${h.currentPrice} (ทุนเฉลี่ยใหม่: $${newAvgCost.toFixed(4)}) | ย่อลงมา ${dropPct.toFixed(1)}% ดึงต้นทุนเฉลี่ยลงสำเร็จ`,
@@ -611,7 +623,8 @@ async function runAutopilotCycle() {
           if (buyRes.code === '00000') {
             newLogs.push({
               id: Date.now().toString(),
-              time: new Date().toLocaleTimeString('th-TH'),
+              timestamp: Date.now(),
+              time: getThaiTimeString(),
               action: '🔄 [CLOUD AUTO REBALANCE]',
               symbol: `${stagnant.symbol} ➜ ${urgentDip.symbol}`,
               note: `สลับเงินทุนอัตโนมัติ: ปิดเหรียญนิ่ง ${stagnant.symbol} ดึงเงินสด $${maxSpend.toFixed(2)} เข้าสะสม ${urgentDip.symbol} ที่กำลังย่อตัวสำเร็จ`,
@@ -710,11 +723,12 @@ async function runAutopilotCycle() {
           } else if (gRes.status === 429) {
             const retryHeader = gRes.headers.get('retry-after');
             const waitSec = retryHeader ? parseInt(retryHeader, 10) || 60 : 60;
-            const limitedAt = new Date().toLocaleTimeString('th-TH');
-            const resumeAt = new Date(Date.now() + waitSec * 1000).toLocaleTimeString('th-TH');
+            const limitedAt = getThaiTimeString();
+            const resumeAt = getThaiTimeString(new Date(Date.now() + waitSec * 1000));
             console.log(`[Cloud Trader] Groq Rate limit hit at ${limitedAt}, cooling down until ${resumeAt}`);
             newLogs.push({
               id: Date.now().toString(),
+              timestamp: Date.now(),
               time: limitedAt,
               action: '⏳ [AI COOLDOWN]',
               symbol: best.symbol,
@@ -748,11 +762,12 @@ async function runAutopilotCycle() {
               if (parsed.action === 'HOLD' && parsed.confidence >= 70) aiApproved = false;
             }
           } else if (oRes.status === 429) {
-            const limitedAt = new Date().toLocaleTimeString('th-TH');
-            const resumeAt = new Date(Date.now() + 120 * 1000).toLocaleTimeString('th-TH');
+            const limitedAt = getThaiTimeString();
+            const resumeAt = getThaiTimeString(new Date(Date.now() + 120 * 1000));
             console.log(`[Cloud Trader] OpenRouter Rate limit hit at ${limitedAt}, cooling down until ${resumeAt}`);
             newLogs.push({
               id: Date.now().toString(),
+              timestamp: Date.now(),
               time: limitedAt,
               action: '⏳ [AI COOLDOWN]',
               symbol: best.symbol,
@@ -790,7 +805,8 @@ async function runAutopilotCycle() {
 
           const buyLog = {
             id: Date.now().toString(),
-            time: new Date().toLocaleTimeString('th-TH'),
+            timestamp: Date.now(),
+            time: getThaiTimeString(),
             action: '🚀 [CLOUD AUTO-BUY]',
             symbol: best.symbol,
             note: `ช้อนซื้อ Dip in Uptrend สำเร็จ (${aiModelUsed} Score ${best.totalScore}/100) มูลค่า $${buySize.toFixed(2)} USDT @ $${best.price} | เหตุผล: ${aiDecision.reason || 'AI ผ่านเกณฑ์'}`,
@@ -800,7 +816,8 @@ async function runAutopilotCycle() {
         } else {
           newLogs.push({
             id: Date.now().toString(),
-            time: new Date().toLocaleTimeString('th-TH'),
+            timestamp: Date.now(),
+            time: getThaiTimeString(),
             action: '🚨 [CLOUD AUTO-BUY] ไม่สำเร็จ',
             symbol: best.symbol,
             note: `Bitget API (${buyRes.code}): ${buyRes.msg || 'Order failed'}`,
@@ -818,7 +835,8 @@ async function runAutopilotCycle() {
   // 7. Push cycle health log & updated holdings to Cloudflare D1
   const statusLog = {
     id: Date.now().toString(),
-    time: new Date().toLocaleTimeString('th-TH'),
+    timestamp: Date.now(),
+    time: getThaiTimeString(),
     action: '🤖 [CLOUD 24/7] ตรวจสอบพอร์ต',
     symbol: 'AUTOTD',
     note: `สแกนพอร์ตเรียบร้อย ถือ ${liveHoldingsConfig.length}/${config.maxCoins || 4} เหรียญ | USDT ว่าง $${usdtAvailable.toFixed(2)} | ระบบเฝ้าระวังอัตโนมัติ 24 ชม.`,
@@ -827,7 +845,10 @@ async function runAutopilotCycle() {
 
   try {
     const existingLogs = Array.isArray(config.liveLogs) ? config.liveLogs : [];
-    const updatedLogs = [statusLog, ...newLogs, ...existingLogs].slice(0, 30);
+    const updatedLogs = [statusLog, ...newLogs, ...existingLogs]
+      .filter((v, i, a) => a.findIndex(t => t.id === v.id) === i)
+      .sort((a, b) => Number(b.timestamp || b.id || 0) - Number(a.timestamp || a.id || 0))
+      .slice(0, 30);
     await fetch(CLOUD_CONFIG_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

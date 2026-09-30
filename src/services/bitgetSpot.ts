@@ -356,9 +356,9 @@ export interface SyncedCloudData extends Partial<BitgetConfig> {
   paperBalance?: number;
   holdings?: SpotHolding[];
   liveHoldings?: SpotHolding[];
-  quantLogs?: Array<{ id: string; time: string; action: string; symbol: string; note: string; color: string }>;
-  liveLogs?: Array<{ id: string; time: string; action: string; symbol: string; note: string; color: string }>;
-  liveQuantLogs?: Array<{ id: string; time: string; action: string; symbol: string; note: string; color: string }>;
+  quantLogs?: Array<{ id: string; time: string; timestamp?: number; action: string; symbol: string; note: string; color: string }>;
+  liveLogs?: Array<{ id: string; time: string; timestamp?: number; action: string; symbol: string; note: string; color: string }>;
+  liveQuantLogs?: Array<{ id: string; time: string; timestamp?: number; action: string; symbol: string; note: string; color: string }>;
 }
 
 // Cloudflare Pages Config & Secret Sync across Mobile & Desktop

@@ -85,8 +85,14 @@ export function OrderHistoryCard({ config, quantLogs }: Props) {
 
   // Filtered Quant Logs
   const filteredQuantLogs = React.useMemo(() => {
-    const logs = Array.isArray(quantLogs) ? quantLogs : loadQuantLogs(config.isPaperTrading)
-    return logs.filter((log) => {
+    const rawLogs = (Array.isArray(quantLogs) ? quantLogs : loadQuantLogs(config.isPaperTrading)) as any[]
+    const sortedLogs = [...rawLogs].sort((a, b) => {
+      const timeA = Number(a.timestamp || (a.id && !isNaN(Number(a.id)) ? Number(a.id) : 0))
+      const timeB = Number(b.timestamp || (b.id && !isNaN(Number(b.id)) ? Number(b.id) : 0))
+      if (timeA && timeB && timeA !== timeB) return timeB - timeA
+      return 0
+    })
+    return sortedLogs.filter((log) => {
       const matchSearch =
         !searchQuery ||
         log.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -400,11 +406,15 @@ export function OrderHistoryCard({ config, quantLogs }: Props) {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/40">
-                    {filteredQuantLogs.map((log) => {
+                    {filteredQuantLogs.map((log: any) => {
+                      const rawTs = Number(log.timestamp || (log.id && !isNaN(Number(log.id)) && log.id.length >= 13 ? Number(log.id) : 0))
+                      const displayTime = rawTs > 0
+                        ? new Date(rawTs).toLocaleTimeString("th-TH", { timeZone: "Asia/Bangkok", hour12: false })
+                        : log.time
                       return (
                         <tr key={log.id} className="hover:bg-muted/30 transition-colors">
                           <td className="py-2.5 pl-3 pr-2 font-mono text-[11px] text-muted-foreground">
-                            {log.time}
+                            {displayTime}
                           </td>
                           <td className="py-2.5 px-2">
                             <span

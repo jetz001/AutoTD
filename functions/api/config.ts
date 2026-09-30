@@ -207,9 +207,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       openrouterApiKey: body.openrouterApiKey || currentSaved.openrouterApiKey || baseDefaults.openrouterApiKey,
     };
 
-    if (Array.isArray(body.quantLogs)) merged.quantLogs = body.quantLogs;
-    if (Array.isArray(body.liveLogs)) merged.liveLogs = body.liveLogs;
-    if (Array.isArray(body.liveQuantLogs)) merged.liveQuantLogs = body.liveQuantLogs;
+    const sortLogs = (arr: any[]) => {
+      return [...arr]
+        .filter((v, i, a) => a.findIndex((t: any) => t.id === v.id) === i)
+        .sort((a: any, b: any) => Number(b.timestamp || b.id || 0) - Number(a.timestamp || a.id || 0))
+        .slice(0, 30);
+    };
+    if (Array.isArray(body.quantLogs)) merged.quantLogs = sortLogs(body.quantLogs);
+    if (Array.isArray(body.liveLogs)) merged.liveLogs = sortLogs(body.liveLogs);
+    if (Array.isArray(body.liveQuantLogs)) merged.liveQuantLogs = sortLogs(body.liveQuantLogs);
     if (Array.isArray(body.holdings)) merged.holdings = body.holdings;
     if (Array.isArray(body.liveHoldings)) merged.liveHoldings = body.liveHoldings;
 

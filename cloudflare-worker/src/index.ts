@@ -550,7 +550,8 @@ async function executeTradingCycle(triggerSource: string, env: Env, configOverri
 function addLog(action: string, summary: string, meta?: any) {
   liveLogs.push({
     id: Date.now().toString(),
-    time: new Date().toLocaleTimeString("th-TH"),
+    timestamp: Date.now(),
+    time: new Date().toLocaleTimeString("th-TH", { timeZone: "Asia/Bangkok", hour12: false }),
     action,
     summary,
     meta

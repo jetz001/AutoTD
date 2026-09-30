@@ -298,16 +298,26 @@ export function CryptoPageClient() {
         try {
           const edgeStatus = await fetchEdgeBotStatus()
           if (edgeStatus?.logs && Array.isArray(edgeStatus.logs) && edgeStatus.logs.length > 0) {
-            const edgeLogs = edgeStatus.logs.map((el: any) => ({
-              id: el.id || String(el.timestamp || Date.now()),
-              time: el.timestamp ? new Date(el.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString(),
-              action: el.action || "AI SCAN",
-              symbol: el.symbol || "EDGE BOT",
-              note: el.reason || el.note || el.message || "วิเคราะห์ตลาดอัตโนมัติ",
-              color: el.action?.includes("BUY") ? "#10b981" : el.action?.includes("CUT") ? "#ef4444" : "#38bdf8",
-            }))
+            const edgeLogs = edgeStatus.logs.map((el: any) => {
+              const ts = el.timestamp ? new Date(el.timestamp).getTime() : Date.now()
+              return {
+                id: el.id || String(ts),
+                timestamp: ts,
+                time: new Date(ts).toLocaleTimeString("th-TH", { timeZone: "Asia/Bangkok", hour12: false }),
+                action: el.action || "AI SCAN",
+                symbol: el.symbol || "EDGE BOT",
+                note: el.reason || el.note || el.message || "วิเคราะห์ตลาดอัตโนมัติ",
+                color: el.action?.includes("BUY") ? "#10b981" : el.action?.includes("CUT") ? "#ef4444" : "#38bdf8",
+              }
+            })
             const localLogs = loadQuantLogs(config.isPaperTrading)
-            overallState.recentLogs = [...edgeLogs, ...localLogs].slice(0, 15)
+            const combined = [...edgeLogs, ...localLogs].sort((a: any, b: any) => {
+              const tA = Number(a.timestamp || (a.id && !isNaN(Number(a.id)) ? Number(a.id) : 0))
+              const tB = Number(b.timestamp || (b.id && !isNaN(Number(b.id)) ? Number(b.id) : 0))
+              if (tA && tB && tA !== tB) return tB - tA
+              return 0
+            })
+            overallState.recentLogs = combined.slice(0, 30)
           }
         } catch {}
 
