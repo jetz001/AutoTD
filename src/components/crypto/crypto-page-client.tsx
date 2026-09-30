@@ -122,7 +122,17 @@ export function CryptoPageClient() {
 
           if (Array.isArray(synced.quantLogs)) {
             saveQuantLogs(synced.quantLogs, true)
-            setQuantState((prev) => ({ ...prev, recentLogs: synced.quantLogs }))
+            setQuantState((prev) => ({
+              ...prev,
+              recentLogs: synced.quantLogs!.map((l: any) => ({
+                id: String(l.id || Date.now()),
+                time: String(l.time || ''),
+                action: String(l.action || ''),
+                symbol: String(l.symbol || ''),
+                note: String(l.note || l.message || ''),
+                color: String(l.color || '#38bdf8'),
+              })),
+            }))
           }
         } else {
           // In Live Mode: Load cached live holdings from D1 first for instant accurate UI, then sync genuine Bitget Spot assets
@@ -144,7 +154,14 @@ export function CryptoPageClient() {
           setQuantState((prev) => ({
             ...prev,
             cashReserveUsdt: 0,
-            recentLogs: cloudLiveLogs,
+            recentLogs: (cloudLiveLogs || []).map((l: any) => ({
+              id: String(l.id || Date.now()),
+              time: String(l.time || ''),
+              action: String(l.action || ''),
+              symbol: String(l.symbol || ''),
+              note: String(l.note || l.message || ''),
+              color: String(l.color || '#38bdf8'),
+            })),
             activeCoinsCount: initialHoldings.length,
           }))
 
@@ -538,10 +555,18 @@ export function CryptoPageClient() {
         if (!config.isPaperTrading && Array.isArray(synced?.liveHoldings) && synced.liveHoldings.length > 0) {
           setHoldings(synced.liveHoldings)
         }
-        if (Array.isArray(synced?.liveLogs) && synced.liveLogs.length > 0) {
+        const liveLogs = synced?.liveLogs
+        if (Array.isArray(liveLogs) && liveLogs.length > 0) {
           setQuantState((prev) => ({
             ...prev,
-            recentLogs: synced.liveLogs,
+            recentLogs: liveLogs.map((l: any) => ({
+              id: String(l.id || Date.now()),
+              time: String(l.time || ''),
+              action: String(l.action || ''),
+              symbol: String(l.symbol || ''),
+              note: String(l.note || l.message || ''),
+              color: String(l.color || '#38bdf8'),
+            })),
           }))
         }
       } catch (err) {
