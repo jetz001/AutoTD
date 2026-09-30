@@ -839,13 +839,31 @@ export async function fetchRealBitgetHoldings(
   } catch {}
 
   const localLive = loadSpotHoldings(false);
-  const costMap: Record<string, { avgCostPrice: number; tranchesCount: number; history: any[] }> = {};
+  const costMap: Record<string, { 
+    avgCostPrice: number; 
+    tranchesCount: number; 
+    history: any[];
+    entryTimestamp?: number;
+    maxHoldMinutes?: number;
+    targetTimeframe?: "5m" | "15m" | "1h";
+    primaryIndicator?: string;
+    trailingSlPrice?: number;
+    breakevenLocked?: boolean;
+    manualLock?: boolean;
+  }> = {};
   for (const h of localLive) {
     if (h.symbol && h.avgCostPrice > 0) {
       costMap[h.symbol] = {
         avgCostPrice: h.avgCostPrice,
         tranchesCount: h.tranchesCount || 1,
         history: h.history || [],
+        entryTimestamp: h.entryTimestamp,
+        maxHoldMinutes: h.maxHoldMinutes,
+        targetTimeframe: h.targetTimeframe,
+        primaryIndicator: h.primaryIndicator,
+        trailingSlPrice: h.trailingSlPrice,
+        breakevenLocked: h.breakevenLocked,
+        manualLock: h.manualLock,
       };
     }
   }
@@ -862,6 +880,7 @@ export async function fetchRealBitgetHoldings(
       let avgCost = costMap[sym]?.avgCostPrice || 0;
       let tranchesCount = costMap[sym]?.tranchesCount || 1;
       let history = costMap[sym]?.history || [];
+      const meta = costMap[sym];
 
       // If avgCost is missing or matches market price exactly, fetch real filled buy order from Bitget!
       if ((avgCost <= 0 || avgCost === price) && config?.apiKey) {
@@ -903,6 +922,13 @@ export async function fetchRealBitgetHoldings(
         cutLossPrice: parseFloat((avgCost * (1 - slTarget / 100)).toFixed(4)),
         isPaper: false,
         history: history.length > 0 ? history : [{ price: avgCost, amount: a.available, time: 'Bitget Spot' }],
+        entryTimestamp: meta?.entryTimestamp || Date.now(),
+        maxHoldMinutes: meta?.maxHoldMinutes || 180,
+        targetTimeframe: meta?.targetTimeframe || '15m',
+        primaryIndicator: meta?.primaryIndicator,
+        trailingSlPrice: meta?.trailingSlPrice,
+        breakevenLocked: meta?.breakevenLocked,
+        manualLock: meta?.manualLock,
       });
     }
   }
@@ -1052,7 +1078,8 @@ export async function executeSpotBuyTranche(
   symbol: string,
   price: number,
   usdtAmount: number,
-  config: BitgetConfig
+  config: BitgetConfig,
+  strategyParams?: { targetTimeframe?: "5m" | "15m" | "1h"; primaryIndicator?: string; maxHoldMinutes?: number }
 ): Promise<{ success: boolean; message: string; updatedHoldings: SpotHolding[] }> {
   const isPaper = config.isPaperTrading ?? true;
   const holdings = loadSpotHoldings(isPaper);
@@ -1136,7 +1163,10 @@ export async function executeSpotBuyTranche(
     }
 
     const base = symbol.replace('USDT', '');
-    const newAvgCost = price;
+    const tf = strategyParams?.targetTimeframe || '15m';
+    const indicator = strategyParams?.primaryIndicator || 'CONFLUENCE_SCORE';
+    const holdMins = strategyParams?.maxHoldMinutes || (tf === '5m' ? 90 : tf === '1h' ? 360 : 180);
+
     const newHolding: SpotHolding = {
       symbol,
       baseCoin: base,
@@ -1151,6 +1181,12 @@ export async function executeSpotBuyTranche(
       cutLossPrice: parseFloat((price * (1 - config.cutLossPercent / 100)).toFixed(4)),
       isPaper: config.isPaperTrading,
       history: [{ price, amount: coinsBought, time: nowStr }],
+      targetTimeframe: tf,
+      primaryIndicator: indicator,
+      entryTimestamp: Date.now(),
+      maxHoldMinutes: holdMins,
+      breakevenLocked: false,
+      manualLock: false,
     };
 
     holdings.push(newHolding);

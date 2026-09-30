@@ -493,8 +493,14 @@ export function CryptoPageClient() {
               }
 
               if (shouldExecuteBuy) {
+                const targetTicker = evaluated.find((t) => t.symbol === decision.symbol) || screenerMatrix.find((m) => m.symbol === decision.symbol)
+                const stratParams = {
+                  targetTimeframe: (targetTicker?.bestTf || "15m") as "5m" | "15m" | "1h",
+                  primaryIndicator: targetTicker?.primaryIndicator || targetTicker?.signal || "CONFLUENCE_SCORE",
+                  maxHoldMinutes: targetTicker?.bestTf === "5m" ? 90 : targetTicker?.bestTf === "1h" ? 360 : 180,
+                }
                 const trancheBudget = calculateTrancheBudget(availableCash, config.tranchePercent)
-                const res = await executeSpotBuyTranche(decision.symbol, decision.price, trancheBudget, config)
+                const res = await executeSpotBuyTranche(decision.symbol, decision.price, trancheBudget, config, stratParams)
                 setHoldings(res.updatedHoldings)
                 setActionAlert(`⚡ [AUTO BUY] ${res.message}`)
                 setTimeout(() => setActionAlert(null), 5000)
@@ -606,7 +612,13 @@ export function CryptoPageClient() {
   // Buy Tranche Handler (Real or Paper)
   const handleBuyTranche = async (symbol: string, price: number) => {
     const trancheBudget = 500 // $500 per tranche
-    const res = await executeSpotBuyTranche(symbol, price, trancheBudget, config)
+    const targetTicker = tickers.find((t) => t.symbol === symbol) || screenerMatrix.find((m) => m.symbol === symbol)
+    const stratParams = {
+      targetTimeframe: (targetTicker?.bestTf || "15m") as "5m" | "15m" | "1h",
+      primaryIndicator: targetTicker?.primaryIndicator || targetTicker?.signal || "CONFLUENCE_BUY",
+      maxHoldMinutes: targetTicker?.bestTf === "5m" ? 90 : targetTicker?.bestTf === "1h" ? 360 : 180,
+    }
+    const res = await executeSpotBuyTranche(symbol, price, trancheBudget, config, stratParams)
     setHoldings(res.updatedHoldings)
     setActionAlert(res.message)
     setTimeout(() => setActionAlert(null), 4000)

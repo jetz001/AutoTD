@@ -154,22 +154,27 @@ export function SpotHoldingsAvgCostCard({
                   const isCloseToTp = h.currentPrice >= h.takeProfitPrice
                   const isCloseToSl = h.currentPrice <= h.cutLossPrice
 
-                  // Calculate live remaining countdown in real-time seconds
-                  const entryTime = h.entryTimestamp || (h.history?.[0]?.time ? new Date(h.history[0].time).getTime() : 0)
-                  const maxMinutes = h.maxHoldMinutes || 180
-                  const maxDurationMs = maxMinutes * 60 * 1000
-                  const effectiveEntryTime = entryTime > 0 && entryTime <= currentTimestamp ? entryTime : (currentTimestamp - 30000)
-                  const expiryTimestamp = effectiveEntryTime + maxDurationMs
-                  const diffSeconds = Math.floor((expiryTimestamp - currentTimestamp) / 1000)
-                  const remainingSeconds = Math.max(0, diffSeconds)
-                  const isTimeExpired = diffSeconds <= 0
+                  // Format Start Time and End Time clearly as requested
+                  const entryTime = h.entryTimestamp && h.entryTimestamp > 0
+                    ? h.entryTimestamp
+                    : (h.history?.[0]?.time && !isNaN(new Date(h.history[0].time).getTime())
+                      ? new Date(h.history[0].time).getTime()
+                      : Date.now())
 
-                  const rHours = Math.floor(remainingSeconds / 3600)
-                  const rMins = Math.floor((remainingSeconds % 3600) / 60)
-                  const rSecs = remainingSeconds % 60
-                  const formattedCountdown = rHours > 0
-                    ? `${rHours}ชม. ${String(rMins).padStart(2, "0")}น. ${String(rSecs).padStart(2, "0")}วิ`
-                    : `${String(rMins).padStart(2, "0")}น. ${String(rSecs).padStart(2, "0")}วิ`
+                  const maxMinutes = h.maxHoldMinutes || 180
+                  const expiryTimestamp = entryTime + (maxMinutes * 60 * 1000)
+                  const isTimeExpired = Date.now() >= expiryTimestamp
+
+                  const startTimeStr = new Date(entryTime).toLocaleTimeString("th-TH", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    hour12: false,
+                  })
+                  const endTimeStr = new Date(expiryTimestamp).toLocaleTimeString("th-TH", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    hour12: false,
+                  })
 
                   return (
                     <tr
@@ -190,7 +195,7 @@ export function SpotHoldingsAvgCostCard({
                         </div>
                       </td>
 
-                      {/* 2. Strategy, Timeframe & Remaining Hold Time Countdown */}
+                      {/* 2. Strategy, Timeframe & Start / End Time Display */}
                       <td className="py-2.5 px-2">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {h.targetTimeframe && (
@@ -212,11 +217,20 @@ export function SpotHoldingsAvgCostCard({
                             </span>
                           )}
                         </div>
-                        <div className="mt-1 flex items-center gap-1 text-[10px] font-mono">
-                          <Clock className={`h-3 w-3 ${isTimeExpired ? "text-amber-400 animate-bounce" : "text-emerald-400 animate-pulse"}`} />
-                          <span className={isTimeExpired ? "text-amber-400 font-bold" : "text-emerald-400 font-semibold"}>
-                            {isTimeExpired ? "ครบกำหนดเวลา (รอหมุน)" : `⏱️ ${formattedCountdown}`}
+                        <div className="mt-1 flex items-center gap-1.5 text-[10px] font-mono flex-wrap">
+                          <Clock className={`h-3 w-3 ${isTimeExpired ? "text-amber-400" : "text-emerald-400"}`} />
+                          <span className="text-foreground font-semibold">
+                            เริ่ม {startTimeStr} ➔ สิ้นสุด {endTimeStr}
                           </span>
+                          {isTimeExpired ? (
+                            <span className="rounded bg-amber-500/20 px-1 py-0.2 text-[8px] font-bold text-amber-400 border border-amber-500/30">
+                              ครบกำหนด
+                            </span>
+                          ) : (
+                            <span className="rounded bg-emerald-500/20 px-1 py-0.2 text-[8px] font-bold text-emerald-400 border border-emerald-500/30">
+                              กำลังถือ ({maxMinutes} น.)
+                            </span>
+                          )}
                         </div>
                       </td>
 
