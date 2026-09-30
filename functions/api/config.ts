@@ -66,6 +66,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     liveHoldings: [],
     liveLogs: [],
     liveQuantLogs: [],
+    screenerMatrix: [],
   };
 
   const now = Date.now();
@@ -174,6 +175,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     liveHoldings: [],
     liveLogs: [],
     liveQuantLogs: [],
+    screenerMatrix: [],
   };
 
   try {
@@ -218,6 +220,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     if (Array.isArray(body.liveQuantLogs)) merged.liveQuantLogs = sortLogs(body.liveQuantLogs);
     if (Array.isArray(body.holdings)) merged.holdings = body.holdings;
     if (Array.isArray(body.liveHoldings)) merged.liveHoldings = body.liveHoldings;
+    if (Array.isArray(body.screenerMatrix)) merged.screenerMatrix = body.screenerMatrix;
 
     if (body.clearLogs || body.resetAll) {
       merged.liveLogs = [];

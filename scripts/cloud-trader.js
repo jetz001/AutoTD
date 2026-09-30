@@ -3,6 +3,7 @@
 // Zero local PC dependency, zero Cloudflare WAF block
 
 const crypto = require('crypto');
+const indicators = require('./indicators.js');
 
 const BITGET_HOST = 'https://api.bitget.com';
 const CLOUD_CONFIG_URL = 'https://autotd.pages.dev/api/config';
@@ -20,6 +21,26 @@ function signBitgetRequest(timestamp, method, requestPath, queryString, bodyStr,
 
 function getThaiTimeString(date = new Date()) {
   return date.toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok', hour12: false });
+}
+
+async function fetchBitgetCandles(symbol, granularity = '15min', limit = '30') {
+  try {
+    const res = await fetch(`${BITGET_HOST}/api/v2/spot/market/candles?symbol=${symbol}&granularity=${granularity}&limit=${limit}`);
+    const json = await res.json();
+    if (json.code === '00000' && Array.isArray(json.data)) {
+      return json.data.map(c => ({
+        time: parseInt(c[0]),
+        open: parseFloat(c[1]),
+        high: parseFloat(c[2]),
+        low: parseFloat(c[3]),
+        close: parseFloat(c[4]),
+        volume: parseFloat(c[6] || c[5] || '0')
+      })).reverse();
+    }
+  } catch (e) {
+    console.warn(`Candle fetch error for ${symbol} (${granularity}):`, e.message);
+  }
+  return [];
 }
 
 const BITGET_QTY_PRECISION_MAP = {
@@ -288,15 +309,15 @@ async function runAutopilotCycle() {
   let { usdtAvailable, assets } = assetData;
   console.log(`Available USDT: $${usdtAvailable.toFixed(4)}`);
 
-  // Build active holdings
-  const holdings = [];
+  // Separate Active Holdings (val >= $1.00 USD) from Dust (< $1.00 USD)
+  const allHoldings = [];
   for (const a of assets) {
     if (a.coin === 'USDT') continue;
     const sym = `${a.coin}USDT`;
     const price = priceMap[sym] || 0;
     const val = a.available * price;
-    if (val >= 0.50) {
-      holdings.push({
+    if (a.available > 0 && price > 0) {
+      allHoldings.push({
         symbol: sym,
         baseCoin: a.coin,
         amount: a.available,
@@ -306,7 +327,13 @@ async function runAutopilotCycle() {
     }
   }
 
-  console.log(`Current Spot Holdings (${holdings.length}/${config.maxCoins || 4}):`, holdings.map(h => `${h.baseCoin} ($${h.valUsd.toFixed(2)})`).join(', '));
+  const holdings = allHoldings.filter(h => h.valUsd >= 1.00);
+  const dustHoldings = allHoldings.filter(h => h.valUsd < 1.00);
+
+  console.log(`Active Spot Holdings (${holdings.length}/${config.maxCoins || 4}):`, holdings.map(h => `${h.baseCoin} ($${h.valUsd.toFixed(2)})`).join(', ') || 'None');
+  if (dustHoldings.length > 0) {
+    console.log(`Dust coins (< $1.00):`, dustHoldings.map(d => `${d.baseCoin} ($${d.valUsd.toFixed(4)})`).join(', '));
+  }
 
   const newLogs = [];
 
@@ -415,7 +442,9 @@ async function runAutopilotCycle() {
   // ==========================================
   const tpTarget = config.takeProfitPercent || 3.5;
   const slTarget = config.cutLossPercent || 5.0;
-  let liveHoldingsConfig = Array.isArray(config.liveHoldings) ? [...config.liveHoldings] : [];
+  let liveHoldingsConfig = Array.isArray(config.liveHoldings)
+    ? config.liveHoldings.filter(lh => holdings.some(h => h.symbol === lh.symbol))
+    : [];
 
   for (let i = 0; i < holdings.length; i++) {
     const h = holdings[i];
@@ -452,11 +481,15 @@ async function runAutopilotCycle() {
       const pnlPct = ((h.currentPrice - avgCost) / avgCost) * 100;
       h.pnlPct = pnlPct;
       h.avgCost = avgCost;
-      console.log(`Holding ${h.symbol}: Price $${h.currentPrice}, AvgCost $${avgCost}, PnL: ${pnlPct.toFixed(2)}% (TP: +${tpTarget}%, SL: -${slTarget}%)`);
 
-      // 5.1 Take Profit
-      if (pnlPct >= tpTarget) {
-        console.log(`🚀 [CLOUD TAKE-PROFIT TRIGGERED] ${h.symbol} hit +${pnlPct.toFixed(2)}% >= +${tpTarget}%! Executing market sell...`);
+      const effectiveTp = match?.takeProfitPrice || (avgCost * (1 + tpTarget / 100));
+      const effectiveSl = match?.trailingSlPrice || match?.cutLossPrice || (avgCost * (1 - slTarget / 100));
+
+      console.log(`Holding ${h.symbol}: Price $${h.currentPrice}, AvgCost $${avgCost}, PnL: ${pnlPct.toFixed(2)}% | TP: $${effectiveTp.toFixed(4)}, SL: $${effectiveSl.toFixed(4)}`);
+
+      // 5.1 Take Profit (Hard Exit)
+      if (h.currentPrice >= effectiveTp) {
+        console.log(`🚀 [CLOUD TAKE-PROFIT TRIGGERED] ${h.symbol} hit $${h.currentPrice} >= TP $${effectiveTp}! Executing market sell...`);
         const sellSize = formatCoinAmount(h.amount, h.symbol);
         const sellRes = await placeBitgetOrder({
           symbol: h.symbol,
@@ -482,9 +515,9 @@ async function runAutopilotCycle() {
           continue;
         }
       }
-      // 5.2 Cut Loss
-      else if (pnlPct <= -slTarget) {
-        console.log(`🚨 [CLOUD CUT-LOSS TRIGGERED] ${h.symbol} hit ${pnlPct.toFixed(2)}% <= -${slTarget}%! Executing market sell...`);
+      // 5.2 Cut Loss / Trailing Stop (Hard Exit)
+      else if (h.currentPrice <= effectiveSl) {
+        console.log(`🚨 [CLOUD STOP-LOSS TRIGGERED] ${h.symbol} hit $${h.currentPrice} <= SL $${effectiveSl}! Executing market sell...`);
         const sellSize = formatCoinAmount(h.amount, h.symbol);
         const sellRes = await placeBitgetOrder({
           symbol: h.symbol,
@@ -508,6 +541,62 @@ async function runAutopilotCycle() {
           holdings.splice(i, 1);
           i--;
           continue;
+        }
+      }
+      // 5.3 Breakeven Lock & Dynamic Trailing
+      else if (pnlPct >= 1.5 && match && !match.manualLock) {
+        if (!match.breakevenLocked) {
+          match.breakevenLocked = true;
+          match.trailingSlPrice = parseFloat((avgCost * 1.002).toFixed(4));
+          console.log(`[BREAKEVEN] ${h.symbol} locked at $${match.trailingSlPrice}`);
+          newLogs.push({
+            id: Date.now().toString(),
+            timestamp: Date.now(),
+            time: getThaiTimeString(),
+            action: '🔒 [DYNAMIC BREAKEVEN]',
+            symbol: h.symbol,
+            note: `กำไรวิ่งแตะ +${pnlPct.toFixed(2)}% (>= +1.5%) ➡️ เลื่อนจุดตัดขาดทุนมาบังทุนที่ $${match.trailingSlPrice} ล็อกความเสี่ยงห้ามขาดทุน`,
+            color: '#10b981'
+          });
+        }
+
+        // Dynamic Trailing via 15m SuperTrend
+        try {
+          const recentCandles = await fetchBitgetCandles(h.symbol, '15min', '20');
+          if (recentCandles.length >= 15) {
+            const st = indicators.calculateSuperTrend(recentCandles, 10, 3.0);
+            const latestSt = st[st.length - 1];
+            if (latestSt.direction === 1 && latestSt.supertrend > (match.trailingSlPrice || 0) && latestSt.supertrend < h.currentPrice) {
+              match.trailingSlPrice = parseFloat(latestSt.supertrend.toFixed(4));
+              console.log(`Trailing SL for ${h.symbol} advanced to $${match.trailingSlPrice}`);
+            }
+          }
+        } catch (trailErr) {}
+      }
+
+      // 5.4 Adaptive Time-Stop Check (if price is stagnant)
+      if (match && match.entryTimestamp && match.maxHoldMinutes && !match.manualLock) {
+        const elapsedMin = (Date.now() - match.entryTimestamp) / 60000;
+        if (elapsedMin >= match.maxHoldMinutes && Math.abs(pnlPct) < 1.0) {
+          console.log(`[TIME STOP] ${h.symbol} reached ${Math.round(elapsedMin)}m limit without breakout. Rebalancing...`);
+          const sellSize = formatCoinAmount(h.amount, h.symbol);
+          const sellRes = await placeBitgetOrder({ symbol: h.symbol, side: 'sell', orderType: 'market', size: sellSize }, config);
+          if (sellRes.code === '00000') {
+            liveHoldingsConfig = liveHoldingsConfig.filter(lh => lh.symbol !== h.symbol);
+            usdtAvailable += (h.amount * h.currentPrice);
+            newLogs.push({
+              id: Date.now().toString(),
+              timestamp: Date.now(),
+              time: getThaiTimeString(),
+              action: '⏱️ [TIME-STOP] REBALANCE',
+              symbol: h.symbol,
+              note: `หมดเวลาถือครอง ${match.maxHoldMinutes} นาที (${match.targetTimeframe || '15m'}) ราคาแกว่งแคบ ${pnlPct.toFixed(2)}% สั่งปิดเพื่อนำเงินสดไปเข้าเหรียญใหม่`,
+              color: '#f59e0b'
+            });
+            holdings.splice(i, 1);
+            i--;
+            continue;
+          }
         }
       }
     }
@@ -637,67 +726,99 @@ async function runAutopilotCycle() {
   }
 
   // ==========================================
-  // 6. CANDIDATE SCREENING & AUTO-BUY (DIP IN UPTREND)
+  // 6. MULTI-TIMEFRAME CANDIDATE SCREENING & AUTO-BUY
   // ==========================================
+  const screenerMatrix = [];
+  const STABLECOINS = ['USDC', 'USDGO', 'FDUSD', 'USDE', 'DAI', 'TUSD', 'EUR', 'BUSD'];
+  const REAL_R_CRYPTO = ['RENDERUSDT', 'ROSEUSDT', 'RUNEUSDT', 'RAYUSDT', 'REQUSDT'];
+  const heldSymbols = new Set(holdings.map(h => h.symbol));
+
+  const liquidPairs = (tickersJson.data || [])
+    .filter(item => {
+      if (!item.symbol || !item.symbol.endsWith('USDT')) return false;
+      const sym = item.symbol;
+      if (sym.includes('_')) return false;
+      if (sym.startsWith('R') && !REAL_R_CRYPTO.includes(sym)) return false;
+      const base = sym.replace('USDT', '');
+      if (STABLECOINS.includes(base)) return false;
+      const vol = parseFloat(item.usdtVolume || '0');
+      const price = parseFloat(item.lastPr || '0');
+      return price > 0 && vol > 1000000;
+    })
+    .sort((a, b) => parseFloat(b.usdtVolume || '0') - parseFloat(a.usdtVolume || '0'))
+    .slice(0, 20);
+
+  console.log(`Analyzing Multi-Timeframe indicators for Top ${liquidPairs.length} liquid coins...`);
+
+  for (const pair of liquidPairs) {
+    const sym = pair.symbol;
+    const price = parseFloat(pair.lastPr || '0');
+    const change24h = parseFloat(pair.change24h || '0') * 100;
+    const vol = parseFloat(pair.usdtVolume || '0');
+
+    // Parallel fetch 5m, 15m, 1h candles
+    const [c5m, c15m, c1h] = await Promise.all([
+      fetchBitgetCandles(sym, '5min', '30'),
+      fetchBitgetCandles(sym, '15min', '30'),
+      fetchBitgetCandles(sym, '1h', '30')
+    ]);
+
+    const confluence = indicators.calculateMultiTimeframeConfluence(c5m, c15m, c1h);
+    screenerMatrix.push({
+      symbol: sym,
+      baseCoin: sym.replace('USDT', ''),
+      price,
+      change24h,
+      vol,
+      totalScore: confluence.totalScore,
+      grade: confluence.grade,
+      bestTf: confluence.bestTf,
+      primaryIndicator: confluence.primaryIndicator,
+      isSupertrendBullish: confluence.isSupertrendBullish,
+      timeframes: confluence.timeframes,
+      updatedAt: Date.now()
+    });
+  }
+
+  // Sort matrix by totalScore descending
+  screenerMatrix.sort((a, b) => b.totalScore - a.totalScore);
+
   if (ACTION_INPUT === 'cycle' && usdtAvailable >= 5 && holdings.length < (config.maxCoins || 4)) {
-    console.log(`Cash available ($${usdtAvailable.toFixed(2)}) & slots open (${holdings.length}/${config.maxCoins || 4}). Scanning candidates...`);
-    const STABLECOINS = ['USDC', 'USDGO', 'FDUSD', 'USDE', 'DAI', 'TUSD', 'EUR', 'BUSD'];
-    const REAL_R_CRYPTO = ['RENDERUSDT', 'ROSEUSDT', 'RUNEUSDT', 'RAYUSDT', 'REQUSDT'];
-    const heldSymbols = new Set(holdings.map(h => h.symbol));
+    console.log(`Cash available ($${usdtAvailable.toFixed(2)}) & slots open (${holdings.length}/${config.maxCoins || 4}). Finding Grade A/A+ candidates...`);
 
-    const candidates = tickersJson.data
-      .filter(item => {
-        if (!item.symbol || !item.symbol.endsWith('USDT')) return false;
-        const sym = item.symbol;
-        if (sym.includes('_') || heldSymbols.has(sym)) return false;
-        if (sym.startsWith('R') && !REAL_R_CRYPTO.includes(sym)) return false;
-        const base = sym.replace('USDT', '');
-        if (STABLECOINS.includes(base)) return false;
-        const vol = parseFloat(item.usdtVolume || '0');
-        const price = parseFloat(item.lastPr || '0');
-        return price > 0 && vol > 1000000;
-      })
-      .map(item => {
-        const vol = parseFloat(item.usdtVolume || '0');
-        const price = parseFloat(item.lastPr || '0');
-        const change = parseFloat(item.change24h || '0') * 100;
-        const high = parseFloat(item.high24h || '0');
-        const low = parseFloat(item.low24h || '0');
-        const range = high - low;
-        const pos = range > 0 ? (price - low) / range : 0.5;
+    const buyCandidates = screenerMatrix
+      .filter(c => !heldSymbols.has(c.symbol) && c.totalScore >= 70);
 
-        let trendScore = 15;
-        if (change >= 1 && change <= 6) trendScore = 35;
-        else if (change > 6 && change <= 12) trendScore = 26;
-        else if (change < 0 && change >= -3) trendScore = 22;
+    if (buyCandidates.length > 0) {
+      const best = buyCandidates[0];
+      const tfData = best.timeframes[best.bestTf] || best.timeframes['15m'];
+      const atrVal = tfData.atrVal || (best.price * 0.02);
 
-        let pullbackScore = 20;
-        if (pos >= 0.35 && pos <= 0.55) pullbackScore = 35;
-        else if (pos >= 0.25 && pos < 0.35) pullbackScore = 30;
+      // Volatility-Adaptive TP (2x ATR or Fibo) and SL (SuperTrend or 1.5x ATR)
+      const tpTargetPrice = parseFloat((best.price + 2.0 * atrVal).toFixed(4));
+      const slTargetPrice = parseFloat(Math.min(
+        best.price * 0.96,
+        tfData.supertrendPrice > 0 ? tfData.supertrendPrice : (best.price - 1.5 * atrVal)
+      ).toFixed(4));
 
-        let volScore = 10;
-        if (vol > 20000000) volScore = 30;
-        else if (vol > 5000000) volScore = 22;
+      // Adaptive Time-Stop Duration (minutes)
+      let maxHoldMinutes = 180; // 3 hours (15m default)
+      if (best.bestTf === '5m') maxHoldMinutes = 90; // 1.5 hours
+      else if (best.bestTf === '1h') maxHoldMinutes = 360; // 6 hours
 
-        const totalScore = Math.min(99, Math.max(15, trendScore + pullbackScore + volScore));
-        return { symbol: item.symbol, price, change, vol, totalScore };
-      })
-      .filter(c => c.totalScore >= 80)
-      .sort((a, b) => b.totalScore - a.totalScore);
+      console.log(`Top Candidate: ${best.symbol} (Score ${best.totalScore}/100 Grade ${best.grade}) @ $${best.price} | Trigger: ${best.primaryIndicator} (${best.bestTf}) | TP: $${tpTargetPrice}, SL: $${slTargetPrice}, TimeStop: ${maxHoldMinutes}m`);
 
-    if (candidates.length > 0) {
-      const best = candidates[0];
-      console.log(`Found top candidate: ${best.symbol} with score ${best.totalScore}/100 @ $${best.price}`);
-
-      // Consult Groq (Primary) & OpenRouter (Fallback) AI Sentinel
-      let aiDecision = { action: 'BUY_SPOT', confidence: 85, reason: 'Quant Heuristics Score >= 80' };
+      // Consult AI Sentinel
+      let aiDecision = { action: 'BUY_SPOT', confidence: 85, reason: `Multi-Timeframe Confluence Grade ${best.grade}` };
       const groqKey = config.groqApiKey || process.env.GROQ_API_KEY;
       const orKey = config.openrouterApiKey || process.env.OPENROUTER_API_KEY;
 
-      const prompt = `Evaluate Dip-in-Uptrend buy for ${best.symbol} @ $${best.price} (24h Change: ${best.change.toFixed(2)}%, Quant Score: ${best.totalScore}/100, Volume: $${best.vol.toLocaleString()}). Respond ONLY in valid JSON: {"action":"BUY_SPOT"|"HOLD","confidence":number,"reason":"short explanation"}`;
+      const prompt = `Quant Score: ${best.totalScore}/100 (${best.grade}) for ${best.symbol} @ $${best.price}.
+Trigger: ${best.primaryIndicator} (${best.bestTf}). Proposed TP: $${tpTargetPrice}, SL: $${slTargetPrice}, Hold: ${maxHoldMinutes}m.
+Respond ONLY in JSON: {"action":"BUY_SPOT"|"HOLD","confidence":number,"reason":"short explanation"}`;
 
       let aiApproved = true;
-      let aiModelUsed = 'quant_score';
+      let aiModelUsed = 'quant_multi_tf';
 
       if (groqKey) {
         try {
@@ -720,28 +841,13 @@ async function runAutopilotCycle() {
               aiModelUsed = 'groq/qwen3.8-27b';
               if (parsed.action === 'HOLD' && parsed.confidence >= 70) aiApproved = false;
             }
-          } else if (gRes.status === 429) {
-            const retryHeader = gRes.headers.get('retry-after');
-            const waitSec = retryHeader ? parseInt(retryHeader, 10) || 60 : 60;
-            const limitedAt = getThaiTimeString();
-            const resumeAt = getThaiTimeString(new Date(Date.now() + waitSec * 1000));
-            console.log(`[Cloud Trader] Groq Rate limit hit at ${limitedAt}, cooling down until ${resumeAt}`);
-            newLogs.push({
-              id: Date.now().toString(),
-              timestamp: Date.now(),
-              time: limitedAt,
-              action: '⏳ [AI COOLDOWN]',
-              symbol: best.symbol,
-              note: `Agent ติด Rate Limit (Groq) เมื่อ ${limitedAt} | จะเริ่มเรียกใหม่เวลา ${resumeAt} (ระหว่างทาง Quant ตรวจสอบตลาดเงียบๆ ไม่ยิง API ซ้ำ)`,
-              color: '#f59e0b'
-            });
           }
         } catch (e) {
-          console.warn('Groq cloud sentinel warning:', e.message);
+          console.warn('Groq AI sentinel warning:', e.message);
         }
       }
 
-      if (aiModelUsed === 'quant_score' && orKey) {
+      if (aiModelUsed === 'quant_multi_tf' && orKey) {
         try {
           const oRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
@@ -761,22 +867,9 @@ async function runAutopilotCycle() {
               aiModelUsed = 'openrouter/qwen3.8-27b:free';
               if (parsed.action === 'HOLD' && parsed.confidence >= 70) aiApproved = false;
             }
-          } else if (oRes.status === 429) {
-            const limitedAt = getThaiTimeString();
-            const resumeAt = getThaiTimeString(new Date(Date.now() + 120 * 1000));
-            console.log(`[Cloud Trader] OpenRouter Rate limit hit at ${limitedAt}, cooling down until ${resumeAt}`);
-            newLogs.push({
-              id: Date.now().toString(),
-              timestamp: Date.now(),
-              time: limitedAt,
-              action: '⏳ [AI COOLDOWN]',
-              symbol: best.symbol,
-              note: `Agent ติด Rate Limit (OpenRouter) เมื่อ ${limitedAt} | จะเริ่มเรียกใหม่เวลา ${resumeAt} (ระหว่างทาง Quant ตรวจสอบตลาดเงียบๆ ไม่ยิง API ซ้ำ)`,
-              color: '#f59e0b'
-            });
           }
         } catch (e) {
-          console.warn('OpenRouter cloud sentinel warning:', e.message);
+          console.warn('OpenRouter sentinel warning:', e.message);
         }
       }
 
@@ -800,6 +893,16 @@ async function runAutopilotCycle() {
             tranchesCount: 1,
             avgCostPrice: best.price,
             totalInvestedUsdt: buySize,
+            currentPrice: best.price,
+            takeProfitPrice: tpTargetPrice,
+            cutLossPrice: slTargetPrice,
+            targetTimeframe: best.bestTf,
+            primaryIndicator: best.primaryIndicator,
+            entryTimestamp: Date.now(),
+            maxHoldMinutes: maxHoldMinutes,
+            trailingSlPrice: slTargetPrice,
+            breakevenLocked: false,
+            manualLock: false,
             isPaper: false
           });
 
@@ -809,7 +912,7 @@ async function runAutopilotCycle() {
             time: getThaiTimeString(),
             action: '🚀 [CLOUD AUTO-BUY]',
             symbol: best.symbol,
-            note: `ช้อนซื้อ Dip in Uptrend สำเร็จ (${aiModelUsed} Score ${best.totalScore}/100) มูลค่า $${buySize.toFixed(2)} USDT @ $${best.price} | เหตุผล: ${aiDecision.reason || 'AI ผ่านเกณฑ์'}`,
+            note: `เข้าซื้อสำเร็จ (${best.grade} Score ${best.totalScore}/100) ไม้ 1 มูลค่า $${buySize.toFixed(2)} USDT @ $${best.price} | สัญญาณ: ${best.primaryIndicator} (${best.bestTf}) | เป้า TP: $${tpTargetPrice}, SL: $${slTargetPrice} (Time-Stop ${maxHoldMinutes}m)`,
             color: '#10b981'
           };
           newLogs.push(buyLog);
@@ -832,14 +935,14 @@ async function runAutopilotCycle() {
     }
   }
 
-  // 7. Push cycle health log & updated holdings to Cloudflare D1
+  // 7. Push cycle health log, updated holdings, and screenerMatrix to Cloudflare D1
   const statusLog = {
     id: Date.now().toString(),
     timestamp: Date.now(),
     time: getThaiTimeString(),
     action: '🤖 [CLOUD 24/7] ตรวจสอบพอร์ต',
     symbol: 'AUTOTD',
-    note: `สแกนพอร์ตเรียบร้อย ถือ ${liveHoldingsConfig.length}/${config.maxCoins || 4} เหรียญ | USDT ว่าง $${usdtAvailable.toFixed(2)} | ระบบเฝ้าระวังอัตโนมัติ 24 ชม.`,
+    note: `สแกนพอร์ตเรียบร้อย ถือ ${liveHoldingsConfig.length}/${config.maxCoins || 4} เหรียญ | USDT ว่าง $${usdtAvailable.toFixed(2)} | อัปเดตตารางวิเคราะห์ 20 เหรียญลง D1 สำเร็จ`,
     color: '#38bdf8'
   };
 
@@ -854,10 +957,11 @@ async function runAutopilotCycle() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         liveHoldings: liveHoldingsConfig,
+        screenerMatrix: screenerMatrix,
         liveLogs: updatedLogs
       })
     });
-    console.log('Pushed cloud health log & holdings to D1 successfully.');
+    console.log('Pushed cloud health log, holdings & screenerMatrix to D1 successfully.');
   } catch (syncErr) {
     console.warn('Sync log error:', syncErr.message);
   }

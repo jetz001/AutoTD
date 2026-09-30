@@ -35,6 +35,28 @@ export interface SpotHolding {
   cutLossPrice: number;    // AvgCost * (1 - SL%)
   isPaper: boolean;
   history: Array<{ price: number; amount: number; time: string }>;
+  // New Quantitative Multi-Timeframe Strategy Metadata
+  targetTimeframe?: "5m" | "15m" | "1h";
+  primaryIndicator?: string;
+  entryTimestamp?: number;
+  maxHoldMinutes?: number;
+  trailingSlPrice?: number;
+  breakevenLocked?: boolean;
+  manualLock?: boolean;
+}
+
+export function filterActiveAndDustHoldings(holdings: SpotHolding[]): { active: SpotHolding[]; dust: SpotHolding[] } {
+  const active: SpotHolding[] = [];
+  const dust: SpotHolding[] = [];
+  for (const h of holdings) {
+    const valuation = (h.totalAmount || 0) * (h.currentPrice || h.avgCostPrice || 0);
+    if (valuation >= 1.0) {
+      active.push(h);
+    } else {
+      dust.push(h);
+    }
+  }
+  return { active, dust };
 }
 
 export interface SpotTickerItem {
@@ -359,6 +381,7 @@ export interface SyncedCloudData extends Partial<BitgetConfig> {
   quantLogs?: Array<{ id: string; time: string; timestamp?: number; action: string; symbol: string; note: string; color: string }>;
   liveLogs?: Array<{ id: string; time: string; timestamp?: number; action: string; symbol: string; note: string; color: string }>;
   liveQuantLogs?: Array<{ id: string; time: string; timestamp?: number; action: string; symbol: string; note: string; color: string }>;
+  screenerMatrix?: any[];
 }
 
 // Cloudflare Pages Config & Secret Sync across Mobile & Desktop

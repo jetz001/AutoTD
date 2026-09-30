@@ -7,6 +7,7 @@ import { BitgetSettingsModal } from "./BitgetSettingsModal"
 import { QuantExecutiveBriefing } from "./QuantExecutiveBriefing"
 import { SpotScreenerCard } from "./SpotScreenerCard"
 import { SpotHoldingsAvgCostCard } from "./SpotHoldingsAvgCostCard"
+import { QuantMatrixCard } from "./QuantMatrixCard"
 import { RealTradingChart } from "./RealTradingChart"
 import { OrderHistoryCard } from "./OrderHistoryCard"
 import {
@@ -17,6 +18,7 @@ import {
   fetchTopBitgetSpotTickers,
   executeSpotBuyTranche,
   executeSpotSell,
+  filterActiveAndDustHoldings,
   updateHoldingsWithLivePrices,
   getPaperBalance,
   setPaperBalance,
@@ -55,6 +57,7 @@ export function CryptoPageClient() {
   })
   const [isScanning, setIsScanning] = React.useState(false)
   const [actionAlert, setActionAlert] = React.useState<string | null>(null)
+  const [screenerMatrix, setScreenerMatrix] = React.useState<any[]>([])
 
   // Quant Executive State
   const [quantState, setQuantState] = React.useState<QuantExecutiveState>(() => {
@@ -97,6 +100,10 @@ export function CryptoPageClient() {
         }
         setConfig(merged)
         saveBitgetConfig(merged)
+
+        if (Array.isArray(synced.screenerMatrix) && synced.screenerMatrix.length > 0) {
+          setScreenerMatrix(synced.screenerMatrix)
+        }
 
         if (targetMode) {
           // In Paper Mode: Sync paper portfolio and paper balance
@@ -520,6 +527,57 @@ export function CryptoPageClient() {
     return () => clearInterval(interval)
   }, [runScanCycle])
 
+  // Periodic Cloud Sync (screenerMatrix, cloud logs, live holdings from Cloudflare D1)
+  React.useEffect(() => {
+    const syncCloudData = async () => {
+      try {
+        const synced = await syncBitgetConfigFromCloudflare()
+        if (synced?.screenerMatrix && Array.isArray(synced.screenerMatrix) && synced.screenerMatrix.length > 0) {
+          setScreenerMatrix(synced.screenerMatrix)
+        }
+        if (!config.isPaperTrading && Array.isArray(synced?.liveHoldings) && synced.liveHoldings.length > 0) {
+          setHoldings(synced.liveHoldings)
+        }
+        if (Array.isArray(synced?.liveLogs) && synced.liveLogs.length > 0) {
+          setQuantState((prev) => ({
+            ...prev,
+            recentLogs: synced.liveLogs,
+          }))
+        }
+      } catch (err) {
+        console.warn("Cloud sync poll warning:", err)
+      }
+    }
+
+    syncCloudData()
+    const cloudInterval = setInterval(syncCloudData, 15000)
+    return () => clearInterval(cloudInterval)
+  }, [config.isPaperTrading])
+
+  // Manual Target, Time-Stop, and Lock Adjustment Handler
+  const handleUpdateHoldingParams = React.useCallback(
+    async (symbol: string, updates: Partial<SpotHolding>) => {
+      setHoldings((prev) => {
+        const updated = prev.map((h) => (h.symbol === symbol ? { ...h, ...updates } : h))
+        saveSpotHoldings(updated, config.isPaperTrading ?? true)
+
+        fetch("/api/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            [config.isPaperTrading ? "holdings" : "liveHoldings"]: updated,
+          }),
+        }).catch((err) => console.error("Failed to sync holding update to Cloudflare:", err))
+
+        return updated
+      })
+
+      setActionAlert(`⚙️ ปรับแต่งเป้าหมายของ ${symbol} เรียบร้อยแล้ว`)
+      setTimeout(() => setActionAlert(null), 3500)
+    },
+    [config.isPaperTrading]
+  )
+
   // Buy Tranche Handler (Real or Paper)
   const handleBuyTranche = async (symbol: string, price: number) => {
     const trancheBudget = 500 // $500 per tranche
@@ -838,7 +896,13 @@ export function CryptoPageClient() {
         config={config}
       />
 
-      {/* 2. Middle Grid: Spot Screener (Left) & Holdings & Avg Cost (Right) */}
+      {/* 2. Quant Multi-Timeframe Confluence Matrix Heatmap */}
+      <QuantMatrixCard
+        screenerMatrix={screenerMatrix}
+        onSelectCoin={(symbol) => setSelectedSymbol(symbol)}
+      />
+
+      {/* 3. Middle Grid: Spot Screener (Left) & Holdings & Avg Cost (Right) */}
       <div className="grid grid-cols-12 gap-4">
         {/* Spot AI Screener */}
         <SpotScreenerCard
@@ -846,7 +910,7 @@ export function CryptoPageClient() {
           selectedSymbol={selectedSymbol}
           onSelectSymbol={setSelectedSymbol}
           onBuyTranche={handleBuyTranche}
-          isPortfolioFull={holdings.length >= config.maxCoins}
+          isPortfolioFull={filterActiveAndDustHoldings(holdings).active.length >= config.maxCoins}
           onRebalanceSwap={handleRebalanceSwap}
         />
 
@@ -856,6 +920,7 @@ export function CryptoPageClient() {
           config={config}
           onSellHolding={handleSellHolding}
           onSelectSymbol={setSelectedSymbol}
+          onUpdateHolding={handleUpdateHoldingParams}
         />
       </div>
 
