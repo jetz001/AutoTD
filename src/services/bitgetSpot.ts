@@ -19,6 +19,8 @@ export interface BitgetConfig {
   maxCoins: number;          // e.g. 5
   cashReservePercent: number;// e.g. 30 = 30%
   autoRebalanceEnabled: boolean; // Rebalance weakest holding on Grade A+ opportunities
+  liveHoldings?: SpotHolding[];
+  screenerMatrix?: any[];
 }
 
 export interface SpotHolding {
@@ -851,19 +853,42 @@ export async function fetchRealBitgetHoldings(
     breakevenLocked?: boolean;
     manualLock?: boolean;
   }> = {};
+
+  // 1. Merge metadata from config.liveHoldings (from Cloudflare D1) first
+  if (Array.isArray(config?.liveHoldings)) {
+    for (const h of config.liveHoldings) {
+      if (h.symbol) {
+        costMap[h.symbol] = {
+          avgCostPrice: h.avgCostPrice,
+          tranchesCount: h.tranchesCount || 1,
+          history: h.history || [],
+          entryTimestamp: h.entryTimestamp,
+          maxHoldMinutes: h.maxHoldMinutes,
+          targetTimeframe: h.targetTimeframe,
+          primaryIndicator: h.primaryIndicator,
+          trailingSlPrice: h.trailingSlPrice,
+          breakevenLocked: h.breakevenLocked,
+          manualLock: h.manualLock,
+        };
+      }
+    }
+  }
+
+  // 2. Next merge from localLive
   for (const h of localLive) {
     if (h.symbol && h.avgCostPrice > 0) {
       costMap[h.symbol] = {
+        ...costMap[h.symbol],
         avgCostPrice: h.avgCostPrice,
-        tranchesCount: h.tranchesCount || 1,
-        history: h.history || [],
-        entryTimestamp: h.entryTimestamp,
-        maxHoldMinutes: h.maxHoldMinutes,
-        targetTimeframe: h.targetTimeframe,
-        primaryIndicator: h.primaryIndicator,
-        trailingSlPrice: h.trailingSlPrice,
-        breakevenLocked: h.breakevenLocked,
-        manualLock: h.manualLock,
+        tranchesCount: h.tranchesCount || costMap[h.symbol]?.tranchesCount || 1,
+        history: h.history?.length ? h.history : costMap[h.symbol]?.history || [],
+        entryTimestamp: h.entryTimestamp || costMap[h.symbol]?.entryTimestamp,
+        maxHoldMinutes: h.maxHoldMinutes || costMap[h.symbol]?.maxHoldMinutes,
+        targetTimeframe: h.targetTimeframe || costMap[h.symbol]?.targetTimeframe,
+        primaryIndicator: h.primaryIndicator || costMap[h.symbol]?.primaryIndicator,
+        trailingSlPrice: h.trailingSlPrice || costMap[h.symbol]?.trailingSlPrice,
+        breakevenLocked: h.breakevenLocked ?? costMap[h.symbol]?.breakevenLocked,
+        manualLock: h.manualLock ?? costMap[h.symbol]?.manualLock,
       };
     }
   }
@@ -908,6 +933,28 @@ export async function fetchRealBitgetHoldings(
       const tpTarget = config?.takeProfitPercent || 3.5;
       const slTarget = config?.cutLossPercent || 5.0;
 
+      // Match with live Quant Screener Matrix to discover the real distinct technical indicator & timeframe
+      const matrixItem = Array.isArray(config?.screenerMatrix)
+        ? config.screenerMatrix.find((m: any) => m.symbol === sym)
+        : null;
+
+      const targetTimeframe: "5m" | "15m" | "1h" = meta?.targetTimeframe || 
+        (matrixItem?.bestTf as "5m" | "15m" | "1h") || 
+        (sym.includes('BTC') ? '1h' : sym.includes('SOL') ? '15m' : '5m');
+
+      const primaryIndicator = (meta?.primaryIndicator && meta.primaryIndicator !== 'CONFLUENCE_SCORE' && meta.primaryIndicator !== 'Multi-Indicator')
+        ? meta.primaryIndicator
+        : (matrixItem?.primaryIndicator && matrixItem.primaryIndicator !== 'NEUTRAL'
+            ? matrixItem.primaryIndicator
+            : (sym.includes('BTC') ? 'TREND_ALIGNMENT' : sym.includes('SOL') ? 'BOLL_RSI_DIP' : sym.includes('ZEC') ? 'BOLLINGER_LOWER_BOUNCE' : 'RSI_OVERSOLD'));
+
+      const defaultHoldMinutes = targetTimeframe === '5m' ? 90 : targetTimeframe === '1h' ? 360 : 180;
+      const maxHoldMinutes = meta?.maxHoldMinutes || defaultHoldMinutes;
+
+      const entryTimestamp = meta?.entryTimestamp && meta.entryTimestamp > 0
+        ? meta.entryTimestamp
+        : Date.now();
+
       realHoldings.push({
         symbol: sym,
         baseCoin: a.coin,
@@ -922,10 +969,10 @@ export async function fetchRealBitgetHoldings(
         cutLossPrice: parseFloat((avgCost * (1 - slTarget / 100)).toFixed(4)),
         isPaper: false,
         history: history.length > 0 ? history : [{ price: avgCost, amount: a.available, time: 'Bitget Spot' }],
-        entryTimestamp: meta?.entryTimestamp || Date.now(),
-        maxHoldMinutes: meta?.maxHoldMinutes || 180,
-        targetTimeframe: meta?.targetTimeframe || '15m',
-        primaryIndicator: meta?.primaryIndicator,
+        entryTimestamp,
+        maxHoldMinutes,
+        targetTimeframe,
+        primaryIndicator,
         trailingSlPrice: meta?.trailingSlPrice,
         breakevenLocked: meta?.breakevenLocked,
         manualLock: meta?.manualLock,

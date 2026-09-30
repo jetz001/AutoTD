@@ -284,7 +284,10 @@ export function CryptoPageClient() {
           currentHoldings = loadSpotHoldings(true)
         } else {
           // Live mode: fetch real holdings from Bitget Spot account
-          const realData = await fetchRealBitgetHoldings(config, pMap)
+          const realData = await fetchRealBitgetHoldings(
+            { ...config, screenerMatrix, liveHoldings: holdings },
+            pMap
+          )
           currentHoldings = realData.holdings
           liveTotalValuation = realData.totalUsdValue
           if (currentHoldings.length > 0) {
