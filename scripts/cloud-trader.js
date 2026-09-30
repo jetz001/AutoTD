@@ -59,6 +59,8 @@ const BITGET_QTY_PRECISION_MAP = {
   LINKUSDT: 3,
   DOTUSDT: 2,
   BNBUSDT: 3,
+  QNTUSDT: 4,
+  KIIUSDT: 2,
 };
 
 function getCoinPrecision(symbol) {
@@ -786,8 +788,9 @@ async function runAutopilotCycle() {
   if (ACTION_INPUT === 'cycle' && usdtAvailable >= 5 && holdings.length < (config.maxCoins || 4)) {
     console.log(`Cash available ($${usdtAvailable.toFixed(2)}) & slots open (${holdings.length}/${config.maxCoins || 4}). Finding Grade A/A+ candidates...`);
 
+    const minEntryScore = holdings.length === 0 ? 60 : 65;
     const buyCandidates = screenerMatrix
-      .filter(c => !heldSymbols.has(c.symbol) && c.totalScore >= 70);
+      .filter(c => !heldSymbols.has(c.symbol) && c.totalScore >= minEntryScore && c.primaryIndicator !== 'NEUTRAL');
 
     if (buyCandidates.length > 0) {
       const best = buyCandidates[0];

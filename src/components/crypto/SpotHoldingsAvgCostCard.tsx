@@ -56,6 +56,16 @@ export const indicatorLabelMap: Record<string, { label: string; desc: string; co
     desc: "MFI เม็ดเงินไหลเข้าสะสม",
     color: "bg-teal-500/15 text-teal-400 border-teal-500/30",
   },
+  BUY_DIP: {
+    label: "ย่อซื้อ Dip Buy",
+    desc: "ย่อซื้อในรอบพักตัวของแนวโน้มขาขึ้น",
+    color: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
+  },
+  RSI_DIP: {
+    label: "RSI Dip",
+    desc: "RSI ย่อแตะแนวรับ",
+    color: "bg-purple-500/15 text-purple-400 border-purple-500/30",
+  },
   CONFLUENCE_SCORE: {
     label: "สัญญาณผสม (Confluence)",
     desc: "ระบบวิเคราะห์คะแนนผสมผสานหลายมิติ",
