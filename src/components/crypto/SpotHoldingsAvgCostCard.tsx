@@ -20,6 +20,82 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { filterActiveAndDustHoldings, type SpotHolding, type BitgetConfig } from "@/services/bitgetSpot"
 
+export const indicatorLabelMap: Record<string, { label: string; desc: string; color: string }> = {
+  SUPERTREND_STOCH_CROSS: {
+    label: "SuperTrend + Stoch",
+    desc: "SuperTrend ขาขึ้น + Stoch ตัดขึ้น",
+    color: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
+  },
+  RSI_OVERSOLD: {
+    label: "RSI Oversold",
+    desc: "RSI ขายมากเกินไปพร้อมดีดตัว",
+    color: "bg-purple-500/15 text-purple-400 border-purple-500/30",
+  },
+  BOLLINGER_LOWER_BOUNCE: {
+    label: "Bollinger Bounce",
+    desc: "ชนกรอบล่าง Bollinger Bands เด้งกลับ",
+    color: "bg-blue-500/15 text-blue-400 border-blue-500/30",
+  },
+  BOLL_RSI_DIP: {
+    label: "Boll + RSI Dip",
+    desc: "ช้อนแนวรับ Bollinger + RSI Dip",
+    color: "bg-cyan-500/15 text-cyan-400 border-cyan-500/30",
+  },
+  MACD_CROSS: {
+    label: "MACD Cross",
+    desc: "MACD ตัดขึ้น Golden Cross",
+    color: "bg-amber-500/15 text-amber-400 border-amber-500/30",
+  },
+  TREND_ALIGNMENT: {
+    label: "EMA Ribbon",
+    desc: "EMA Ribbon เรียงตัวขาขึ้นสมบูรณ์",
+    color: "bg-indigo-500/15 text-indigo-400 border-indigo-500/30",
+  },
+  MFI_ACCUMULATION: {
+    label: "MFI สะสมทุน",
+    desc: "MFI เม็ดเงินไหลเข้าสะสม",
+    color: "bg-teal-500/15 text-teal-400 border-teal-500/30",
+  },
+  CONFLUENCE_SCORE: {
+    label: "สัญญาณผสม (Confluence)",
+    desc: "ระบบวิเคราะห์คะแนนผสมผสานหลายมิติ",
+    color: "bg-slate-500/15 text-slate-300 border-slate-500/30",
+  },
+  CONFLUENCE_BUY: {
+    label: "สัญญาณผสม (Confluence)",
+    desc: "ระบบวิเคราะห์คะแนนผสมผสานหลายมิติ",
+    color: "bg-slate-500/15 text-slate-300 border-slate-500/30",
+  },
+  MULTIPLE_CONF: {
+    label: "สัญญาณผสม (Confluence)",
+    desc: "ระบบวิเคราะห์คะแนนผสมผสานหลายมิติ",
+    color: "bg-slate-500/15 text-slate-300 border-slate-500/30",
+  },
+  "Multi-Indicator": {
+    label: "สัญญาณผสม (Confluence)",
+    desc: "ระบบวิเคราะห์คะแนนผสมผสานหลายมิติ",
+    color: "bg-slate-500/15 text-slate-300 border-slate-500/30",
+  },
+  NEUTRAL: {
+    label: "เฝ้าระวังรอจังหวะ",
+    desc: "เฝ้าระวังรอสัญญาณชัดเจน",
+    color: "bg-slate-500/15 text-slate-300 border-slate-500/30",
+  },
+}
+
+export function getIndicatorInfo(key?: string) {
+  if (!key || key === "Multi-Indicator" || key === "CONFLUENCE_SCORE" || key === "CONFLUENCE_BUY" || key === "MULTIPLE_CONF") {
+    return indicatorLabelMap["CONFLUENCE_SCORE"]
+  }
+  return (
+    indicatorLabelMap[key] || {
+      label: key.replace(/_/g, " "),
+      desc: "สัญญาณเทคนิค " + key.replace(/_/g, " "),
+      color: "bg-muted text-foreground border-border",
+    }
+  )
+}
+
 interface Props {
   holdings: SpotHolding[]
   config: BitgetConfig
@@ -46,6 +122,8 @@ export function SpotHoldingsAvgCostCard({
   const [editSlPrice, setEditSlPrice] = React.useState<string>("")
   const [editMaxHoldMinutes, setEditMaxHoldMinutes] = React.useState<number>(180)
   const [editManualLock, setEditManualLock] = React.useState<boolean>(false)
+  const [editTargetTimeframe, setEditTargetTimeframe] = React.useState<"5m" | "15m" | "1h">("15m")
+  const [editPrimaryIndicator, setEditPrimaryIndicator] = React.useState<string>("CONFLUENCE_SCORE")
 
   // Real-time ticking clock for active countdown
   const [currentTimestamp, setCurrentTimestamp] = React.useState<number>(() => Date.now())
@@ -67,6 +145,8 @@ export function SpotHoldingsAvgCostCard({
     setEditSlPrice(h.cutLossPrice.toString())
     setEditMaxHoldMinutes(h.maxHoldMinutes || 180)
     setEditManualLock(Boolean(h.manualLock))
+    setEditTargetTimeframe(h.targetTimeframe || "15m")
+    setEditPrimaryIndicator(h.primaryIndicator || "CONFLUENCE_SCORE")
   }
 
   // Save Edit Modal Changes
@@ -80,6 +160,8 @@ export function SpotHoldingsAvgCostCard({
       cutLossPrice: !isNaN(sl) && sl > 0 ? sl : editingHolding.cutLossPrice,
       maxHoldMinutes: editMaxHoldMinutes,
       manualLock: editManualLock,
+      targetTimeframe: editTargetTimeframe,
+      primaryIndicator: editPrimaryIndicator,
     })
 
     setEditingHolding(null)
@@ -198,14 +280,23 @@ export function SpotHoldingsAvgCostCard({
                       {/* 2. Strategy, Timeframe & Start / End Time Display */}
                       <td className="py-2.5 px-2">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          {h.targetTimeframe && (
-                            <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[9px] font-bold text-sky-400 border border-sky-500/30 font-mono">
-                              {h.targetTimeframe}
-                            </span>
-                          )}
-                          <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] font-medium text-foreground">
-                            {h.primaryIndicator ? h.primaryIndicator.replace(/_/g, " ") : "Multi-Indicator"}
-                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => handleOpenEdit(h, e)}
+                            className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[9px] font-bold text-sky-400 border border-sky-500/30 font-mono hover:bg-sky-500/25 transition cursor-pointer"
+                            title="คลิกเพื่อปรับกรอบเวลา / สัญญาณกลยุทธ์"
+                          >
+                            {h.targetTimeframe || "15m"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => handleOpenEdit(h, e)}
+                            className={`rounded px-1.5 py-0.5 text-[9px] font-semibold border transition cursor-pointer hover:opacity-85 flex items-center gap-1 ${getIndicatorInfo(h.primaryIndicator).color}`}
+                            title={`คลิกเพื่อเปลี่ยนเครื่องมือกลยุทธ์ (${getIndicatorInfo(h.primaryIndicator).desc})`}
+                          >
+                            <Zap className="h-2.5 w-2.5" />
+                            {getIndicatorInfo(h.primaryIndicator).label}
+                          </button>
                           {h.breakevenLocked && (
                             <span className="rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1 py-0.2 text-[8px] font-bold flex items-center gap-0.5" title="ขยับ SL บังทุนแล้ว">
                               <ShieldCheck className="h-2.5 w-2.5" /> บังทุน
@@ -411,6 +502,43 @@ export function SpotHoldingsAvgCostCard({
                   <div className={`font-bold ${editingHolding.pnlPercent >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
                     {editingHolding.pnlPercent >= 0 ? "+" : ""}{editingHolding.pnlPercent.toFixed(2)}%
                   </div>
+                </div>
+              </div>
+
+              {/* Timeframe & Strategy Indicator Selectors */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] font-semibold text-muted-foreground mb-1">
+                    ⏱️ กรอบเวลา (Timeframe)
+                  </label>
+                  <select
+                    value={editTargetTimeframe}
+                    onChange={(e) => setEditTargetTimeframe(e.target.value as "5m" | "15m" | "1h")}
+                    className="w-full rounded-md border border-input bg-background px-2 py-1.5 font-mono text-xs focus:ring-1 focus:ring-primary"
+                  >
+                    <option value="5m">5m (สั้นพิเศษ)</option>
+                    <option value="15m">15m (มาตรฐาน)</option>
+                    <option value="1h">1h (รอบสวิง)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-muted-foreground mb-1">
+                    📊 สัญญาณกลยุทธ์หลัก
+                  </label>
+                  <select
+                    value={editPrimaryIndicator}
+                    onChange={(e) => setEditPrimaryIndicator(e.target.value)}
+                    className="w-full rounded-md border border-input bg-background px-2 py-1.5 font-mono text-xs focus:ring-1 focus:ring-primary"
+                  >
+                    <option value="CONFLUENCE_SCORE">สัญญาณผสม (Confluence)</option>
+                    <option value="RSI_OVERSOLD">RSI Oversold Bounce</option>
+                    <option value="BOLL_RSI_DIP">Bollinger + RSI Dip</option>
+                    <option value="SUPERTREND_STOCH_CROSS">SuperTrend + Stoch</option>
+                    <option value="BOLLINGER_LOWER_BOUNCE">Bollinger Bands Bounce</option>
+                    <option value="MACD_CROSS">MACD Bullish Cross</option>
+                    <option value="TREND_ALIGNMENT">EMA Ribbon ขาขึ้น</option>
+                    <option value="MFI_ACCUMULATION">MFI สะสมเงินทุน</option>
+                  </select>
                 </div>
               </div>
 

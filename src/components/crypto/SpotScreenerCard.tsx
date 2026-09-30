@@ -16,6 +16,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import type { SpotTickerItem } from "@/services/bitgetSpot"
+import { getIndicatorInfo } from "@/components/crypto/SpotHoldingsAvgCostCard"
 
 interface Props {
   tickers: SpotTickerItem[]
@@ -197,17 +198,10 @@ export function SpotScreenerCard({
                       <td className="py-2.5 px-2">
                         <div className="flex items-center gap-1">
                           <span
-                            className={`rounded px-1.5 py-0.5 text-[9px] font-bold font-mono ${
-                              t.primaryIndicator.includes("SUPERTREND")
-                                ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
-                                : t.primaryIndicator.includes("BOLLINGER")
-                                ? "bg-purple-500/15 text-purple-400 border border-purple-500/30"
-                                : t.primaryIndicator.includes("RSI")
-                                ? "bg-sky-500/15 text-sky-400 border border-sky-500/30"
-                                : "bg-muted text-muted-foreground"
-                            }`}
+                            className={`rounded px-1.5 py-0.5 text-[9px] font-semibold border flex items-center gap-1 ${getIndicatorInfo(t.primaryIndicator).color}`}
                           >
-                            {t.primaryIndicator.replace(/_/g, " ")}
+                            <Zap className="h-2.5 w-2.5" />
+                            {getIndicatorInfo(t.primaryIndicator).label}
                           </span>
                         </div>
                         <div className="text-[9px] text-muted-foreground mt-0.5">
