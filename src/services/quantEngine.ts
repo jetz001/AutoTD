@@ -3,7 +3,7 @@ import type { SpotTickerItem, SpotHolding, BitgetConfig } from './bitgetSpot';
 import { isUnderCooldown } from './bitgetSpot';
 
 export interface QuantDecision {
-  action: 'BUY_TRANCHE' | 'TAKE_PROFIT' | 'CUT_LOSS' | 'HOLD_SCANNING';
+  action: 'BUY_TRANCHE' | 'TAKE_PROFIT' | 'CUT_LOSS' | 'HOLD_SCANNING' | 'TIME_EXTEND' | 'TIME_CLOSE';
   symbol: string;
   price: number;
   reason: string;
@@ -12,7 +12,7 @@ export interface QuantDecision {
 }
 
 export interface QuantExecutiveState {
-  status: 'SCANNING' | 'ACCUMULATING' | 'TAKING_PROFIT' | 'CUTTING_LOSS' | 'COOLDOWN_PROTECT';
+  status: 'SCANNING' | 'ACCUMULATING' | 'TAKING_PROFIT' | 'CUTTING_LOSS' | 'COOLDOWN_PROTECT' | 'TIME_EXTENDING' | 'TIME_CLOSING';
   statusMessage: string;
   roundGoalPercent: number; // e.g. 5.0%
   currentRoundProgressPercent: number; // e.g. 3.2%
@@ -294,6 +294,41 @@ export function runQuantPortfolioCheck(
       status = 'ACCUMULATING';
       statusMessage = `📉 สัญญาณเข้าซื้อ DCA ${h.symbol} ไม้ที่ ${h.tranchesCount + 1} ที่ $${h.currentPrice}`;
       break;
+    }
+
+    // 1.4 Adaptive Time-Stop Evaluator (If holding reached maxHoldMinutes and not manually locked)
+    if (h.entryTimestamp && h.maxHoldMinutes && !h.manualLock) {
+      const elapsedMin = (Date.now() - h.entryTimestamp) / 60000;
+      if (elapsedMin >= h.maxHoldMinutes) {
+        const cand = screenedCandidates?.find(c => c.symbol === h.symbol);
+        const isBull = (cand?.aiScore || 0) >= 60 || cand?.signal === 'BUY_DIP';
+
+        if (isBull && h.pnlPercent >= -3.5) {
+          decision = {
+            action: 'TIME_EXTEND',
+            symbol: h.symbol,
+            price: h.currentPrice,
+            reason: `ครบกำหนดเวลาถือครอง (${Math.round(elapsedMin)}/${h.maxHoldMinutes}น.) แต่กราฟ 1h ยังเป็นทรงบวก (Score ${cand?.aiScore || 70}/100) ขยายเวลาถือต่อรอบใหม่`,
+            confidence: 85,
+            timestamp: new Date().toLocaleTimeString(),
+          };
+          status = 'TIME_EXTENDING';
+          statusMessage = `⏱️🔄 กราฟ ${h.symbol} ยังเป็นทรงบวก บอทต่อเวลาและอัปเดตกลยุทธ์ให้อัตโนมัติ`;
+          break;
+        } else {
+          decision = {
+            action: 'TIME_CLOSE',
+            symbol: h.symbol,
+            price: h.currentPrice,
+            reason: `ครบกำหนดเวลาถือครอง (${Math.round(elapsedMin)}/${h.maxHoldMinutes}น.) และกราฟเริ่มเสียทรง บอทสั่งปิดทำกำไร/คืนทุนเพื่อดึงเงินสด`,
+            confidence: 90,
+            timestamp: new Date().toLocaleTimeString(),
+          };
+          status = 'TIME_CLOSING';
+          statusMessage = `⏱️🛑 หมดเวลาถือครอง ${h.symbol} สั่งขายปิดทันทีเพื่อคืนเงินสด`;
+          break;
+        }
+      }
     }
   }
 

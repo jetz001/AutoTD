@@ -576,28 +576,90 @@ async function runAutopilotCycle() {
         } catch (trailErr) {}
       }
 
-      // 5.4 Adaptive Time-Stop Check (if price is stagnant)
+      // 5.4 Adaptive Time-Stop & Dynamic Extension Evaluator
       if (match && match.entryTimestamp && match.maxHoldMinutes && !match.manualLock) {
         const elapsedMin = (Date.now() - match.entryTimestamp) / 60000;
-        if (elapsedMin >= match.maxHoldMinutes && Math.abs(pnlPct) < 1.0) {
-          console.log(`[TIME STOP] ${h.symbol} reached ${Math.round(elapsedMin)}m limit without breakout. Rebalancing...`);
-          const sellSize = formatCoinAmount(h.amount, h.symbol);
-          const sellRes = await placeBitgetOrder({ symbol: h.symbol, side: 'sell', orderType: 'market', size: sellSize }, config);
-          if (sellRes.code === '00000') {
-            liveHoldingsConfig = liveHoldingsConfig.filter(lh => lh.symbol !== h.symbol);
-            usdtAvailable += (h.amount * h.currentPrice);
+        if (elapsedMin >= match.maxHoldMinutes) {
+          console.log(`[TIME EVALUATOR] ${h.symbol} reached ${Math.round(elapsedMin)}m limit. Evaluating if should extend or close...`);
+          
+          let shouldExtend = false;
+          let newTf = match.targetTimeframe || '15m';
+          let newIndicator = match.primaryIndicator || 'CONFLUENCE_SCORE';
+          let evalNote = '';
+
+          try {
+            const [c15, c1h] = await Promise.all([
+              fetchBitgetCandles(h.symbol, '15min', '30'),
+              fetchBitgetCandles(h.symbol, '1h', '30')
+            ]);
+
+            const a15 = c15.length >= 14 ? indicators.analyzeTimeframeIndicators(c15) : null;
+            const a1h = c1h.length >= 14 ? indicators.analyzeTimeframeIndicators(c1h) : null;
+
+            const score15 = a15 ? a15.score : 50;
+            const score1h = a1h ? a1h.score : 50;
+            const isBull15 = a15 && a15.supertrendDir === 1;
+            const isBull1h = a1h && a1h.supertrendDir === 1;
+
+            // Decision: If 1h or 15m is bullish or score >= 60, and not crashing (pnlPct >= -3.5%)
+            if ((isBull1h || isBull15 || score1h >= 60 || score15 >= 60) && pnlPct >= -3.5) {
+              shouldExtend = true;
+              if (score1h >= score15 && isBull1h) {
+                newTf = '1h';
+                newIndicator = a1h.dominantSignal !== 'NEUTRAL' ? a1h.dominantSignal : 'TREND_ALIGNMENT';
+              } else if (a15) {
+                newTf = '15m';
+                newIndicator = a15.dominantSignal !== 'NEUTRAL' ? a15.dominantSignal : (isBull15 ? 'SUPERTREND_STOCH_CROSS' : 'BOLL_RSI_DIP');
+              }
+              evalNote = `กราฟ ${newTf} ยังเป็นทรงบวก (Score ${Math.max(score15, score1h)}/100 | ${isBull1h ? '1h Bull' : '15m Bull'})`;
+            } else {
+              evalNote = `กราฟเสียทรงทั้ง 15m/1h (Score ${Math.max(score15, score1h)}/100) หลุดแนวโน้ม`;
+            }
+          } catch (e) {
+            console.warn(`Time evaluator error for ${h.symbol}:`, e.message);
+          }
+
+          if (shouldExtend) {
+            // EXTEND TIME & CHANGE TO NEW STRATEGY LABEL
+            const addMinutes = newTf === '1h' ? 360 : 180;
+            match.entryTimestamp = Date.now();
+            match.maxHoldMinutes = addMinutes;
+            match.targetTimeframe = newTf;
+            match.primaryIndicator = newIndicator;
+            console.log(`[TIME EXTENDED] ${h.symbol} extended +${addMinutes}m with new label: ${newIndicator} (${newTf})`);
+
             newLogs.push({
               id: Date.now().toString(),
               timestamp: Date.now(),
               time: getThaiTimeString(),
-              action: '⏱️ [TIME-STOP] REBALANCE',
+              action: '⏱️🔄 [TIME-EXTEND] ขยายเวลาถือต่อ',
               symbol: h.symbol,
-              note: `หมดเวลาถือครอง ${match.maxHoldMinutes} นาที (${match.targetTimeframe || '15m'}) ราคาแกว่งแคบ ${pnlPct.toFixed(2)}% สั่งปิดเพื่อนำเงินสดไปเข้าเหรียญใหม่`,
-              color: '#f59e0b'
+              note: `ครบกำหนดแต่ ${evalNote} บอทขยายเวลาถือต่อ +${addMinutes}น. | อัปเดตกรอบเวลาเป็น [${newTf}] และเปลี่ยนสัญญาณกลยุทธ์เป็น [${newIndicator}]`,
+              color: '#38bdf8'
             });
-            holdings.splice(i, 1);
-            i--;
-            continue;
+          } else {
+            // CLOSE & SELL OUT
+            console.log(`[TIME CLOSE] ${h.symbol} closing position: ${evalNote}`);
+            const sellSize = formatCoinAmount(h.amount, h.symbol);
+            const sellRes = await placeBitgetOrder({ symbol: h.symbol, side: 'sell', orderType: 'market', size: sellSize }, config);
+            if (sellRes.code === '00000') {
+              liveHoldingsConfig = liveHoldingsConfig.filter(lh => lh.symbol !== h.symbol);
+              usdtAvailable += (h.amount * h.currentPrice);
+              newLogs.push({
+                id: Date.now().toString(),
+                timestamp: Date.now(),
+                time: getThaiTimeString(),
+                action: '⏱️🛑 [TIME-CLOSE] ขายปิดพอร์ต',
+                symbol: h.symbol,
+                note: `หมดเวลาถือครอง (${Math.round(elapsedMin)}น.) และ ${evalNote} บอทสั่งขายตลาดที่ $${h.currentPrice} คืนเงินสด USDT สำเร็จ`,
+                color: '#f59e0b'
+              });
+              holdings.splice(i, 1);
+              i--;
+              continue;
+            } else {
+              console.error(`Time-stop sell failed for ${h.symbol}:`, sellRes.code, sellRes.msg);
+            }
           }
         }
       }

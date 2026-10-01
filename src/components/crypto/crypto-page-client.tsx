@@ -390,6 +390,51 @@ export function CryptoPageClient() {
               const logs = [newLog, ...loadQuantLogs(config.isPaperTrading)]
               saveQuantLogs(logs, config.isPaperTrading)
             }
+            // 5.2.1 AUTO TIME-EXTEND: Automatically extend holding time & update to new active strategy label
+            else if (decision.action === "TIME_EXTEND") {
+              const matchedMatrix = screenerMatrix.find((m) => m.symbol === decision.symbol)
+              const newTf = (matchedMatrix?.bestTf || "1h") as "5m" | "15m" | "1h"
+              const newIndicator = (matchedMatrix?.primaryIndicator && matchedMatrix.primaryIndicator !== "NEUTRAL") 
+                ? matchedMatrix.primaryIndicator 
+                : "TREND_ALIGNMENT"
+              const addMinutes = newTf === "1h" ? 360 : 180
+
+              await handleUpdateHoldingParams(decision.symbol, {
+                entryTimestamp: Date.now(),
+                maxHoldMinutes: addMinutes,
+                targetTimeframe: newTf,
+                primaryIndicator: newIndicator,
+              })
+
+              const newLog = {
+                id: Date.now().toString(),
+                time: new Date().toLocaleTimeString(),
+                action: "⏱️🔄 [AUTO TIME-EXTEND]",
+                symbol: decision.symbol,
+                note: `${decision.reason} | บอทขยายเวลาต่อ +${addMinutes}น. พร้อมอัปเดตกรอบเวลา [${newTf}] และสัญญาณใหม่ [${newIndicator}]`,
+                color: "#38bdf8",
+              }
+              const logs = [newLog, ...loadQuantLogs(config.isPaperTrading)]
+              saveQuantLogs(logs, config.isPaperTrading)
+            }
+            // 5.2.2 AUTO TIME-CLOSE: Market sell to liquidate expired stagnant holding
+            else if (decision.action === "TIME_CLOSE") {
+              const res = await executeSpotSell(decision.symbol, decision.price, false, config)
+              setHoldings(res.updatedHoldings)
+              setActionAlert(`⏱️🛑 [TIME-STOP] ${res.message}`)
+              setTimeout(() => setActionAlert(null), 5000)
+
+              const newLog = {
+                id: Date.now().toString(),
+                time: new Date().toLocaleTimeString(),
+                action: "⏱️🛑 [TIME-STOP CLOSE]",
+                symbol: decision.symbol,
+                note: `${decision.reason} | ขายปิดตลาดดึงเงินสดกลับกระเป๋า`,
+                color: "#f59e0b",
+              }
+              const logs = [newLog, ...loadQuantLogs(config.isPaperTrading)]
+              saveQuantLogs(logs, config.isPaperTrading)
+            }
             // 5.3 AUTO-BUY: DCA TRANCHE or NEW TRANCHE 1 (Hybrid Quant + OpenRouter AI)
             else if (decision.action === "BUY_TRANCHE") {
               let availableCash = overallState.cashReserveUsdt
