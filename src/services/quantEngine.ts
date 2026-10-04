@@ -277,7 +277,7 @@ export function runQuantPortfolioCheck(
         timestamp: new Date().toLocaleTimeString(),
       };
       status = 'TAKING_PROFIT';
-      statusMessage = `🎯 ถึงเป้ากำไร ${h.symbol} (+${h.pnlPercent.toFixed(1)}%) สั่งขายปิดทำกำไร`;
+      statusMessage = `🎯 ถึงเป้ากำไร ${h.symbol} (+${(h.pnlPercent || 0).toFixed(1)}%) สั่งขายปิดทำกำไร`;
       break;
     }
 
@@ -287,7 +287,7 @@ export function runQuantPortfolioCheck(
         action: 'BUY_TRANCHE',
         symbol: h.symbol,
         price: h.currentPrice,
-        reason: `ราคาลงมาลึก ${h.pnlPercent.toFixed(1)}% จากทุนเดิม $${h.avgCostPrice} เข้าเกณฑ์ DCA สะสมไม้ที่ ${h.tranchesCount + 1}/${config.maxTranches} เพื่อดึงต้นทุนเฉลี่ยลง`,
+        reason: `ราคาลงมาลึก ${(h.pnlPercent || 0).toFixed(1)}% จากทุนเดิม $${h.avgCostPrice} เข้าเกณฑ์ DCA สะสมไม้ที่ ${h.tranchesCount + 1}/${config.maxTranches} เพื่อดึงต้นทุนเฉลี่ยลง`,
         confidence: 88,
         timestamp: new Date().toLocaleTimeString(),
       };
@@ -355,10 +355,10 @@ export function runQuantPortfolioCheck(
   }
 
   // Calculate total deployed vs cash
-  const totalDeployed = holdings.reduce((sum, h) => sum + h.totalInvestedUsdt, 0);
-  const totalUnrealizedPnl = holdings.reduce((sum, h) => sum + h.unrealizedPnlUsdt, 0);
-  const avgPnlPct = holdings.length > 0
-    ? holdings.reduce((sum, h) => sum + h.pnlPercent, 0) / holdings.length
+  const totalDeployed = (holdings || []).reduce((sum, h) => sum + (h.totalInvestedUsdt || 0), 0);
+  const totalUnrealizedPnl = (holdings || []).reduce((sum, h) => sum + (h.unrealizedPnlUsdt || 0), 0);
+  const avgPnlPct = (holdings && holdings.length > 0)
+    ? holdings.reduce((sum, h) => sum + (h.pnlPercent || 0), 0) / holdings.length
     : 0;
 
   if (holdings.length > 0 && status === 'SCANNING') {

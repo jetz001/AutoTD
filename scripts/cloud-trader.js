@@ -1017,11 +1017,32 @@ Respond ONLY in JSON: {"action":"BUY_SPOT"|"HOLD","confidence":number,"reason":"
       .filter((v, i, a) => a.findIndex(t => t.id === v.id) === i)
       .sort((a, b) => Number(b.timestamp || b.id || 0) - Number(a.timestamp || a.id || 0))
       .slice(0, 30);
+    const normalizedLiveHoldings = (liveHoldingsConfig || []).map(lh => {
+      const match = (holdings || []).find(h => h.symbol === lh.symbol);
+      const curPrice = match?.currentPrice || lh.currentPrice || lh.avgCostPrice || 0;
+      const avgCost = lh.avgCostPrice > 0 ? lh.avgCostPrice : curPrice;
+      const amount = lh.totalAmount || match?.amount || 0;
+      const invested = lh.totalInvestedUsdt || (avgCost * amount);
+      const unPnl = (curPrice - avgCost) * amount;
+      const pnlPct = avgCost > 0 ? ((curPrice - avgCost) / avgCost) * 100 : 0;
+      return {
+        ...lh,
+        currentPrice: parseFloat(curPrice.toFixed(6)),
+        avgCostPrice: parseFloat(avgCost.toFixed(6)),
+        totalAmount: amount,
+        totalInvestedUsdt: parseFloat(invested.toFixed(2)),
+        unrealizedPnlUsdt: parseFloat(unPnl.toFixed(2)),
+        pnlPercent: parseFloat(pnlPct.toFixed(2)),
+        takeProfitPrice: lh.takeProfitPrice || parseFloat((avgCost * (1 + tpTarget / 100)).toFixed(6)),
+        cutLossPrice: lh.cutLossPrice || parseFloat((avgCost * (1 - slTarget / 100)).toFixed(6)),
+      };
+    });
+
     await fetch(CLOUD_CONFIG_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        liveHoldings: liveHoldingsConfig,
+        liveHoldings: normalizedLiveHoldings,
         screenerMatrix: screenerMatrix,
         liveLogs: updatedLogs
       })

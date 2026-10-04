@@ -177,12 +177,12 @@ export function QuantMatrixCard({ screenerMatrix = [], onSelectCoin }: Props) {
                           </span>
                         </td>
                         <td className="py-2.5 px-2 font-mono font-semibold">
-                          ${item.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                          ${(item.price || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
                         </td>
                         <td className="py-2.5 px-2 font-mono font-medium">
                           <span className={`inline-flex items-center gap-0.5 ${isPos ? "text-emerald-400" : "text-rose-400"}`}>
                             {isPos ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
-                            {isPos ? "+" : ""}{item.change24h.toFixed(2)}%
+                            {isPos ? "+" : ""}{(item.change24h || 0).toFixed(2)}%
                           </span>
                         </td>
                         <td className="py-2.5 px-2">

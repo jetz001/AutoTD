@@ -15,6 +15,7 @@ import {
   saveBitgetConfig,
   loadSpotHoldings,
   saveSpotHoldings,
+  sanitizeHoldings,
   fetchTopBitgetSpotTickers,
   executeSpotBuyTranche,
   executeSpotSell,
@@ -108,8 +109,9 @@ export function CryptoPageClient() {
         if (targetMode) {
           // In Paper Mode: Sync paper portfolio and paper balance
           if (Array.isArray(synced.holdings)) {
-            saveSpotHoldings(synced.holdings, true)
-            setHoldings(synced.holdings)
+            const clean = sanitizeHoldings(synced.holdings, priceMap)
+            saveSpotHoldings(clean, true)
+            setHoldings(clean)
           } else {
             const localHoldings = loadSpotHoldings(true)
             if (localHoldings.length > 0) setHoldings(localHoldings)
@@ -137,7 +139,7 @@ export function CryptoPageClient() {
         } else {
           // In Live Mode: Load cached live holdings from D1 first for instant accurate UI, then sync genuine Bitget Spot assets
           const initialHoldings = Array.isArray(synced.liveHoldings) && synced.liveHoldings.length > 0
-            ? synced.liveHoldings
+            ? sanitizeHoldings(synced.liveHoldings, priceMap)
             : loadSpotHoldings(false)
           setHoldings(initialHoldings)
           if (initialHoldings.length > 0) {
@@ -167,17 +169,18 @@ export function CryptoPageClient() {
 
           try {
             const realData = await fetchRealBitgetHoldings(merged, priceMap)
-            if (realData.holdings.length > 0) {
-              setHoldings(realData.holdings)
-              saveSpotHoldings(realData.holdings, false)
+            const cleanHoldings = sanitizeHoldings(realData.holdings, priceMap)
+            if (cleanHoldings.length > 0) {
+              setHoldings(cleanHoldings)
+              saveSpotHoldings(cleanHoldings, false)
             }
             setQuantState((prev) => ({
               ...prev,
               cashReserveUsdt: realData.usdtAvailable,
               totalDeployedUsdt: Math.max(0, realData.totalUsdValue - realData.usdtAvailable),
-              activeCoinsCount: realData.holdings.length,
-              statusMessage: realData.holdings.length > 0
-                ? `พอร์ต Bitget Spot รวม $${realData.totalUsdValue.toFixed(2)} USD (${realData.holdings.map((h) => h.baseCoin).join(", ")}) | ยอด USDT ว่าง $${realData.usdtAvailable.toFixed(2)}`
+              activeCoinsCount: cleanHoldings.length,
+              statusMessage: cleanHoldings.length > 0
+                ? `พอร์ต Bitget Spot รวม $${realData.totalUsdValue.toFixed(2)} USD (${cleanHoldings.map((h) => h.baseCoin).join(", ")}) | ยอด USDT ว่าง $${realData.usdtAvailable.toFixed(2)}`
                 : `ยอด USDT ใน Bitget Spot: $${realData.usdtAvailable.toFixed(2)}`,
             }))
           } catch {}
@@ -237,15 +240,16 @@ export function CryptoPageClient() {
       setActionAlert("🔥 สลับเป็นโหมดเทรดจริง (Live Bitget Spot) | กำลังซิงค์เหรียญและกระเป๋าเงินจริง...")
       try {
         const realData = await fetchRealBitgetHoldings(newCfg, priceMap)
-        setHoldings(realData.holdings)
-        if (realData.holdings.length > 0) {
-          saveSpotHoldings(realData.holdings, false)
+        const cleanHoldings = sanitizeHoldings(realData.holdings, priceMap)
+        setHoldings(cleanHoldings)
+        if (cleanHoldings.length > 0) {
+          saveSpotHoldings(cleanHoldings, false)
         }
         setQuantState((prev) => ({
           ...prev,
           cashReserveUsdt: realData.usdtAvailable,
           totalDeployedUsdt: Math.max(0, realData.totalUsdValue - realData.usdtAvailable),
-          activeCoinsCount: realData.holdings.length,
+          activeCoinsCount: cleanHoldings.length,
           statusMessage: realData.holdings.length > 0
             ? `พอร์ต Bitget Spot รวม $${realData.totalUsdValue.toFixed(2)} USD (${realData.holdings.map((h) => h.baseCoin).join(", ")}) | ยอด USDT ว่าง $${realData.usdtAvailable.toFixed(2)}`
             : `ยอด USDT ใน Bitget Spot: $${realData.usdtAvailable.toFixed(2)}`,
@@ -288,7 +292,7 @@ export function CryptoPageClient() {
             { ...config, screenerMatrix, liveHoldings: holdings },
             pMap
           )
-          currentHoldings = realData.holdings
+          currentHoldings = sanitizeHoldings(realData.holdings, pMap)
           liveTotalValuation = realData.totalUsdValue
           if (currentHoldings.length > 0) {
             saveSpotHoldings(currentHoldings, false)
@@ -464,7 +468,7 @@ export function CryptoPageClient() {
                           time: new Date().toLocaleTimeString(),
                           action: "🔄 [AUTO REBALANCE]",
                           symbol: `${weakest.symbol} ➜ ${decision.symbol}`,
-                          note: `เงินสดไม่พอ ($${availableCash.toFixed(2)}) สลับตัวถืออัตโนมัติ: ปิดเหรียญนิ่ง ${weakest.symbol} (PnL ${weakest.pnlPercent.toFixed(1)}%) ดึงเงินสดเข้าสะสม ${decision.symbol}`,
+                          note: `เงินสดไม่พอ ($${availableCash.toFixed(2)}) สลับตัวถืออัตโนมัติ: ปิดเหรียญนิ่ง ${weakest.symbol} (PnL ${(weakest.pnlPercent || 0).toFixed(1)}%) ดึงเงินสดเข้าสะสม ${decision.symbol}`,
                           color: "#a855f7",
                         }
                         saveQuantLogs([rebLog, ...loadQuantLogs(config.isPaperTrading)], config.isPaperTrading)
@@ -717,7 +721,7 @@ export function CryptoPageClient() {
 
     if (
       !confirm(
-        `ไม้เต็มมือแล้ว: ยืนยันให้ Quant สลับตัวอัตโนมัติ?\n\n• ปิดเหรียญนิ่ง: ${weakest.symbol} (PnL ${weakest.pnlPercent.toFixed(1)}%)\n• ซื้อโอกาสทอง A+: ${newSymbol} @ $${price}`
+        `ไม้เต็มมือแล้ว: ยืนยันให้ Quant สลับตัวอัตโนมัติ?\n\n• ปิดเหรียญนิ่ง: ${weakest.symbol} (PnL ${(weakest.pnlPercent || 0).toFixed(1)}%)\n• ซื้อโอกาสทอง A+: ${newSymbol} @ $${price}`
       )
     ) {
       return

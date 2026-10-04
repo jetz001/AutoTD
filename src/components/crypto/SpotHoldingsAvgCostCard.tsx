@@ -144,8 +144,8 @@ export function SpotHoldingsAvgCostCard({
     return () => clearInterval(timer)
   }, [])
 
-  const totalUnrealizedPnl = holdings.reduce((sum, h) => sum + h.unrealizedPnlUsdt, 0)
-  const totalActiveInvested = activeHoldings.reduce((sum, h) => sum + h.totalInvestedUsdt, 0)
+  const totalUnrealizedPnl = (holdings || []).reduce((sum, h) => sum + (h?.unrealizedPnlUsdt || 0), 0)
+  const totalActiveInvested = (activeHoldings || []).reduce((sum, h) => sum + (h?.totalInvestedUsdt || 0), 0)
 
   // Open Edit Modal
   const handleOpenEdit = (h: SpotHolding, e: React.MouseEvent) => {
@@ -241,32 +241,46 @@ export function SpotHoldingsAvgCostCard({
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/40">
-                {activeHoldings.map((h) => {
-                  const isProfit = h.unrealizedPnlUsdt >= 0
-                  const isCloseToTp = h.currentPrice >= h.takeProfitPrice
-                  const isCloseToSl = h.currentPrice <= h.cutLossPrice
+                {activeHoldings.map((rawH) => {
+                  const h = rawH;
+                  const currentPrice = h.currentPrice || h.avgCostPrice || 0;
+                  const avgCost = h.avgCostPrice || currentPrice || 0;
+                  const totalAmount = h.totalAmount || 0;
+                  const totalInvested = h.totalInvestedUsdt || (avgCost * totalAmount);
+                  const pnlUsdt = typeof h.unrealizedPnlUsdt === "number" ? h.unrealizedPnlUsdt : ((currentPrice - avgCost) * totalAmount);
+                  const pnlPct = typeof h.pnlPercent === "number" ? h.pnlPercent : (avgCost > 0 ? ((currentPrice - avgCost) / avgCost) * 100 : 0);
+                  const tpPrice = h.takeProfitPrice || (avgCost * 1.035);
+                  const slPrice = h.cutLossPrice || (avgCost * 0.95);
 
-                  // Format Start Time and End Time clearly as requested
-                  const entryTime = h.entryTimestamp && h.entryTimestamp > 0
+                  const isProfit = pnlUsdt >= 0
+                  const isCloseToTp = currentPrice >= tpPrice
+                  const isCloseToSl = currentPrice <= slPrice
+
+                  // Format Start Time and End Time safely
+                  const entryTime = typeof h.entryTimestamp === "number" && !isNaN(h.entryTimestamp) && h.entryTimestamp > 0
                     ? h.entryTimestamp
                     : (h.history?.[0]?.time && !isNaN(new Date(h.history[0].time).getTime())
                       ? new Date(h.history[0].time).getTime()
                       : Date.now())
 
-                  const maxMinutes = h.maxHoldMinutes || 180
+                  const maxMinutes = typeof h.maxHoldMinutes === "number" && !isNaN(h.maxHoldMinutes) ? h.maxHoldMinutes : 180
                   const expiryTimestamp = entryTime + (maxMinutes * 60 * 1000)
                   const isTimeExpired = Date.now() >= expiryTimestamp
 
-                  const startTimeStr = new Date(entryTime).toLocaleTimeString("th-TH", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    hour12: false,
-                  })
-                  const endTimeStr = new Date(expiryTimestamp).toLocaleTimeString("th-TH", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    hour12: false,
-                  })
+                  let startTimeStr = "--:--"
+                  let endTimeStr = "--:--"
+                  try {
+                    startTimeStr = new Date(entryTime).toLocaleTimeString("th-TH", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      hour12: false,
+                    })
+                    endTimeStr = new Date(expiryTimestamp).toLocaleTimeString("th-TH", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      hour12: false,
+                    })
+                  } catch {}
 
                   return (
                     <tr
@@ -279,11 +293,11 @@ export function SpotHoldingsAvgCostCard({
                         <div className="font-bold text-foreground flex items-center gap-1.5">
                           <span>{h.symbol}</span>
                           <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[9px] font-bold text-primary">
-                            {h.tranchesCount}/{config.maxTranches} ไม้
+                            {h.tranchesCount || 1}/{config?.maxTranches || 4} ไม้
                           </span>
                         </div>
                         <div className="text-[10px] text-muted-foreground font-mono mt-0.5">
-                          ถือ {h.totalAmount < 1 ? h.totalAmount.toFixed(4) : h.totalAmount.toFixed(2)} (${h.totalInvestedUsdt.toFixed(1)})
+                          ถือ {totalAmount < 1 ? totalAmount.toFixed(4) : totalAmount.toFixed(2)} (${totalInvested.toFixed(1)})
                         </div>
                       </td>
 
@@ -338,7 +352,7 @@ export function SpotHoldingsAvgCostCard({
                       {/* 3. Weighted Average Cost */}
                       <td className="py-2.5 px-2">
                         <div className="font-mono font-bold text-sky-400">
-                          ${h.avgCostPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                          ${avgCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
                         </div>
                         <div className="text-[10px] text-muted-foreground">
                           ต้นทุนเฉลี่ย
@@ -348,17 +362,17 @@ export function SpotHoldingsAvgCostCard({
                       {/* Live Market Price */}
                       <td className="py-2.5 px-2">
                         <div className="font-mono font-semibold text-foreground">
-                          ${h.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                          ${currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
                         </div>
                       </td>
 
                       {/* PnL % and $ */}
                       <td className="py-2.5 px-2">
                         <div className={`font-mono font-bold ${isProfit ? "text-emerald-500" : "text-rose-500"}`}>
-                          {isProfit ? "+" : ""}{h.pnlPercent.toFixed(2)}%
+                          {isProfit ? "+" : ""}{pnlPct.toFixed(2)}%
                         </div>
                         <div className={`text-[10px] font-mono ${isProfit ? "text-emerald-500/80" : "text-rose-500/80"}`}>
-                          {isProfit ? "+" : ""}${h.unrealizedPnlUsdt.toFixed(2)}
+                          {isProfit ? "+" : ""}${pnlUsdt.toFixed(2)}
                         </div>
                       </td>
 
@@ -366,15 +380,15 @@ export function SpotHoldingsAvgCostCard({
                       <td className="py-2.5 px-2 font-mono text-[10px]">
                         <div className="flex items-center gap-1 text-emerald-500">
                           <span>TP:</span>
-                          <span className="font-bold">${h.takeProfitPrice.toLocaleString(undefined, { maximumFractionDigits: 4 })}</span>
+                          <span className="font-bold">${tpPrice.toLocaleString(undefined, { maximumFractionDigits: 4 })}</span>
                           {isCloseToTp && <span className="rounded bg-emerald-500 px-1 text-[8px] text-white">ถึงเป้า</span>}
                         </div>
                         <div className="flex items-center gap-1 text-rose-500 mt-0.5">
                           <span>SL:</span>
-                          <span className="font-bold">${h.cutLossPrice.toLocaleString(undefined, { maximumFractionDigits: 4 })}</span>
+                          <span className="font-bold">${slPrice.toLocaleString(undefined, { maximumFractionDigits: 4 })}</span>
                           {isCloseToSl && <span className="rounded bg-rose-500 px-1 text-[8px] text-white">แตะคัท</span>}
                         </div>
-                        {h.trailingSlPrice && h.trailingSlPrice > h.cutLossPrice && (
+                        {h.trailingSlPrice && h.trailingSlPrice > slPrice && (
                           <div className="text-[9px] text-sky-400">
                             Trail: ${h.trailingSlPrice.toLocaleString(undefined, { maximumFractionDigits: 4 })}
                           </div>
@@ -457,12 +471,12 @@ export function SpotHoldingsAvgCostCard({
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-muted-foreground">
-                        ≈ ${dh.totalInvestedUsdt.toFixed(2)}
+                        ≈ ${(dh.totalInvestedUsdt || 0).toFixed(2)}
                       </span>
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => onSellHolding(dh.symbol, dh.currentPrice, true)}
+                        onClick={() => onSellHolding(dh.symbol, dh.currentPrice || 0, true)}
                         className="h-5 px-1.5 text-[9px] text-rose-400 hover:text-rose-300 hover:bg-rose-500/10"
                         title="ขายเศษเหรียญนี้ทิ้ง"
                       >
@@ -501,16 +515,16 @@ export function SpotHoldingsAvgCostCard({
               <div className="rounded-lg bg-muted/40 p-2.5 flex justify-between items-center font-mono">
                 <div>
                   <div className="text-[10px] text-muted-foreground">ต้นทุนเฉลี่ย</div>
-                  <div className="font-bold text-sky-400">${editingHolding.avgCostPrice.toFixed(4)}</div>
+                  <div className="font-bold text-sky-400">${(editingHolding.avgCostPrice || 0).toFixed(4)}</div>
                 </div>
                 <div>
                   <div className="text-[10px] text-muted-foreground">ราคาตลาด</div>
-                  <div className="font-bold text-foreground">${editingHolding.currentPrice.toFixed(4)}</div>
+                  <div className="font-bold text-foreground">${(editingHolding.currentPrice || 0).toFixed(4)}</div>
                 </div>
                 <div>
                   <div className="text-[10px] text-muted-foreground">PnL ปัจจุบัน</div>
-                  <div className={`font-bold ${editingHolding.pnlPercent >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
-                    {editingHolding.pnlPercent >= 0 ? "+" : ""}{editingHolding.pnlPercent.toFixed(2)}%
+                  <div className={`font-bold ${(editingHolding.pnlPercent ?? 0) >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
+                    {(editingHolding.pnlPercent ?? 0) >= 0 ? "+" : ""}{(editingHolding.pnlPercent ?? 0).toFixed(2)}%
                   </div>
                 </div>
               </div>

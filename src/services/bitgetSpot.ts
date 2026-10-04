@@ -47,10 +47,77 @@ export interface SpotHolding {
   manualLock?: boolean;
 }
 
+export function sanitizeHolding(h: any, livePrice?: number): SpotHolding {
+  const symbol = String(h?.symbol || '').toUpperCase();
+  const baseCoin = String(h?.baseCoin || symbol.replace('USDT', '') || 'COIN');
+  const totalAmount = typeof h?.totalAmount === 'number' && !isNaN(h.totalAmount) ? h.totalAmount : (parseFloat(h?.totalAmount) || 0);
+  const avgCostPrice = typeof h?.avgCostPrice === 'number' && !isNaN(h.avgCostPrice) && h.avgCostPrice > 0
+    ? h.avgCostPrice
+    : (typeof h?.currentPrice === 'number' && !isNaN(h.currentPrice) ? h.currentPrice : (livePrice || 0));
+  const currentPrice = typeof livePrice === 'number' && livePrice > 0
+    ? livePrice
+    : (typeof h?.currentPrice === 'number' && !isNaN(h.currentPrice) && h.currentPrice > 0 ? h.currentPrice : avgCostPrice);
+  
+  const totalInvestedUsdt = typeof h?.totalInvestedUsdt === 'number' && !isNaN(h.totalInvestedUsdt)
+    ? h.totalInvestedUsdt
+    : (avgCostPrice * totalAmount);
+  
+  const unPnl = (currentPrice - avgCostPrice) * totalAmount;
+  const unrealizedPnlUsdt = typeof h?.unrealizedPnlUsdt === 'number' && !isNaN(h.unrealizedPnlUsdt)
+    ? h.unrealizedPnlUsdt
+    : unPnl;
+
+  const pnlPct = avgCostPrice > 0 ? ((currentPrice - avgCostPrice) / avgCostPrice) * 100 : 0;
+  const pnlPercent = typeof h?.pnlPercent === 'number' && !isNaN(h.pnlPercent)
+    ? h.pnlPercent
+    : pnlPct;
+
+  const tpTarget = typeof h?.takeProfitPrice === 'number' && !isNaN(h.takeProfitPrice) && h.takeProfitPrice > 0
+    ? h.takeProfitPrice
+    : (avgCostPrice * 1.035);
+
+  const slTarget = typeof h?.cutLossPrice === 'number' && !isNaN(h.cutLossPrice) && h.cutLossPrice > 0
+    ? h.cutLossPrice
+    : (avgCostPrice * 0.95);
+
+  return {
+    symbol,
+    baseCoin,
+    totalAmount,
+    tranchesCount: typeof h?.tranchesCount === 'number' && h.tranchesCount > 0 ? h.tranchesCount : 1,
+    avgCostPrice: parseFloat(avgCostPrice.toFixed(6)),
+    totalInvestedUsdt: parseFloat(totalInvestedUsdt.toFixed(2)),
+    currentPrice: parseFloat(currentPrice.toFixed(6)),
+    unrealizedPnlUsdt: parseFloat(unrealizedPnlUsdt.toFixed(2)),
+    pnlPercent: parseFloat(pnlPercent.toFixed(2)),
+    takeProfitPrice: parseFloat(tpTarget.toFixed(6)),
+    cutLossPrice: parseFloat(slTarget.toFixed(6)),
+    isPaper: Boolean(h?.isPaper),
+    history: Array.isArray(h?.history) && h.history.length > 0 ? h.history : [{ price: avgCostPrice, amount: totalAmount, time: 'Entry' }],
+    entryTimestamp: typeof h?.entryTimestamp === 'number' && h.entryTimestamp > 0 ? h.entryTimestamp : Date.now(),
+    maxHoldMinutes: typeof h?.maxHoldMinutes === 'number' && h.maxHoldMinutes > 0 ? h.maxHoldMinutes : 180,
+    targetTimeframe: h?.targetTimeframe || '15m',
+    primaryIndicator: h?.primaryIndicator || 'CONFLUENCE_SCORE',
+    trailingSlPrice: typeof h?.trailingSlPrice === 'number' ? parseFloat(h.trailingSlPrice.toFixed(6)) : parseFloat(slTarget.toFixed(6)),
+    breakevenLocked: Boolean(h?.breakevenLocked),
+    manualLock: Boolean(h?.manualLock),
+  };
+}
+
+export function sanitizeHoldings(holdings: any[], priceMap?: Record<string, number>): SpotHolding[] {
+  if (!Array.isArray(holdings)) return [];
+  return holdings
+    .filter(h => h && (h.symbol || h.baseCoin))
+    .map(h => sanitizeHolding(h, priceMap?.[h.symbol]));
+}
+
 export function filterActiveAndDustHoldings(holdings: SpotHolding[]): { active: SpotHolding[]; dust: SpotHolding[] } {
+  if (!Array.isArray(holdings)) return { active: [], dust: [] };
   const active: SpotHolding[] = [];
   const dust: SpotHolding[] = [];
-  for (const h of holdings) {
+  for (const raw of holdings) {
+    if (!raw) continue;
+    const h = sanitizeHolding(raw);
     const valuation = (h.totalAmount || 0) * (h.currentPrice || h.avgCostPrice || 0);
     if (valuation >= 1.0) {
       active.push(h);
@@ -1096,14 +1163,15 @@ export function loadSpotHoldings(isPaper = true): SpotHolding[] {
       if (Array.isArray(parsed)) {
         if (!isPaper) {
           // Strictly filter out paper-simulated mock holdings from Live mode
-          return parsed.filter(
+          const realOnly = parsed.filter(
             (h: any) =>
               h &&
               h.isPaper !== true &&
               !['ZECUSDT', 'XLMUSDT', 'ONDOUSDT'].includes(h.symbol)
           );
+          return sanitizeHoldings(realOnly);
         }
-        return parsed;
+        return sanitizeHoldings(parsed);
       }
     } catch {}
   }
@@ -1421,29 +1489,34 @@ export function updateHoldingsWithLivePrices(
   holdings: SpotHolding[],
   priceMap: Record<string, number>
 ): SpotHolding[] {
-  return holdings.map(h => {
-    const live = priceMap[h.symbol] ?? h.currentPrice;
-    const unPnl = (live - h.avgCostPrice) * h.totalAmount;
-    const pnlPct = ((live - h.avgCostPrice) / h.avgCostPrice) * 100;
+  if (!Array.isArray(holdings)) return [];
+  return holdings.map(raw => {
+    const h = sanitizeHolding(raw);
+    const live = priceMap?.[h.symbol] ?? (h.currentPrice > 0 ? h.currentPrice : h.avgCostPrice);
+    const avg = h.avgCostPrice > 0 ? h.avgCostPrice : live;
+    const amount = h.totalAmount || 0;
+    const unPnl = (live - avg) * amount;
+    const pnlPct = avg > 0 ? ((live - avg) / avg) * 100 : 0;
     return {
       ...h,
-      currentPrice: live,
-      unrealizedPnlUsdt: unPnl,
-      pnlPercent: pnlPct,
+      currentPrice: parseFloat(live.toFixed(6)),
+      totalInvestedUsdt: parseFloat((h.totalInvestedUsdt || (avg * amount)).toFixed(2)),
+      unrealizedPnlUsdt: parseFloat(unPnl.toFixed(2)),
+      pnlPercent: parseFloat(pnlPct.toFixed(2)),
     };
   });
 }
 
 // Identify Weakest Holding (Dead Capital / Stagnant sideways asset)
 export function findWeakestHolding(holdings: SpotHolding[]): SpotHolding | null {
-  if (holdings.length === 0) return null;
+  if (!Array.isArray(holdings) || holdings.length === 0) return null;
   // Prioritize position with PnL closest to 0% (stagnant/sideways) and lowest profit
   const sorted = [...holdings].sort((a, b) => {
-    const aAbs = Math.abs(a.pnlPercent);
-    const bAbs = Math.abs(b.pnlPercent);
+    const aAbs = Math.abs(a?.pnlPercent ?? 0);
+    const bAbs = Math.abs(b?.pnlPercent ?? 0);
     return aAbs - bAbs;
   });
-  return sorted[0];
+  return sorted[0] || null;
 }
 
 // Execute Rebalance Rotation (Sell weakest position, buy Grade A+ opportunity)
