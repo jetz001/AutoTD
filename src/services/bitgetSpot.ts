@@ -286,35 +286,83 @@ export async function fetchTopBitgetSpotTickers(): Promise<SpotTickerItem[]> {
   }
 }
 
-// Fetch Bitget Spot Candles
+// Fetch Bitget Spot Candles with In-Memory Cache and Rate-Limit Protection
+const candleCache: Record<string, { candles: any[]; timestamp: number }> = {};
+const pendingCandleRequests: Record<string, Promise<any[]>> = {};
+
 export async function fetchBitgetSpotCandles(
   symbol: string,
   granularity = '15min',
   limit = 100
-) {
-  try {
-    const res = await fetch(
-      `https://api.bitget.com/api/v2/spot/market/candles?symbol=${symbol}&granularity=${granularity}&limit=${limit}`
-    );
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = await res.json();
-    if (json.code !== '00000' || !Array.isArray(json.data)) return [];
+): Promise<Array<{ time: number; open: number; high: number; low: number; close: number; volume: number }>> {
+  const cacheKey = `${symbol}_${granularity}_${limit}`;
+  const now = Date.now();
 
-    // [ts, open, high, low, close, baseVol, quoteVol, usdtVol]
-    return [...json.data]
-      .sort((a, b) => parseInt(a[0]) - parseInt(b[0]))
-      .map(item => ({
-        time: Math.floor(parseInt(item[0]) / 1000),
-        open: parseFloat(item[1]),
-        high: parseFloat(item[2]),
-        low: parseFloat(item[3]),
-        close: parseFloat(item[4]),
-        volume: parseFloat(item[7] || item[5]),
-      }));
-  } catch (e) {
-    console.warn('Failed to fetch Bitget spot candles:', e);
-    return [];
+  // 1. Return fresh cache if available (TTL: 30s)
+  const cached = candleCache[cacheKey];
+  if (cached && now - cached.timestamp < 30000) {
+    return cached.candles;
   }
+
+  // 2. Coalesce concurrent requests for identical candle parameters
+  if (pendingCandleRequests[cacheKey]) {
+    return pendingCandleRequests[cacheKey];
+  }
+
+  const fetchPromise = (async () => {
+    try {
+      const directUrl = `https://api.bitget.com/api/v2/spot/market/candles?symbol=${symbol}&granularity=${granularity}&limit=${limit}`;
+      let res = await fetch(directUrl);
+
+      // If rate-limited (HTTP 429), try falling back to Pages proxy
+      if (res.status === 429) {
+        if (cached?.candles?.length) {
+          return cached.candles; // Use stale cache on 429
+        }
+        try {
+          const proxyUrl = `/api/bitget?action=candles&symbol=${symbol}&granularity=${granularity}&limit=${limit}`;
+          const proxyRes = await fetch(proxyUrl);
+          if (proxyRes.ok) {
+            res = proxyRes;
+          }
+        } catch {}
+      }
+
+      if (!res.ok) {
+        if (cached?.candles?.length) return cached.candles;
+        return [];
+      }
+
+      const json = await res.json();
+      if (json.code !== '00000' || !Array.isArray(json.data)) {
+        if (cached?.candles?.length) return cached.candles;
+        return [];
+      }
+
+      // [ts, open, high, low, close, baseVol, quoteVol, usdtVol]
+      const candles = [...json.data]
+        .sort((a, b) => parseInt(a[0]) - parseInt(b[0]))
+        .map(item => ({
+          time: Math.floor(parseInt(item[0]) / 1000),
+          open: parseFloat(item[1]),
+          high: parseFloat(item[2]),
+          low: parseFloat(item[3]),
+          close: parseFloat(item[4]),
+          volume: parseFloat(item[7] || item[5]),
+        }));
+
+      candleCache[cacheKey] = { candles, timestamp: Date.now() };
+      return candles;
+    } catch (e) {
+      if (cached?.candles?.length) return cached.candles;
+      return [];
+    } finally {
+      delete pendingCandleRequests[cacheKey];
+    }
+  })();
+
+  pendingCandleRequests[cacheKey] = fetchPromise;
+  return fetchPromise;
 }
 
 // Real 15m RSI Calculation & Cache
@@ -333,18 +381,19 @@ export async function fetchRealRsi15m(symbol: string): Promise<number> {
       rsiCache[symbol] = { rsi, timestamp: Date.now() };
       return rsi;
     }
-  } catch (e) {
-    console.warn(`Failed to fetch 15m candles for RSI of ${symbol}:`, e);
-  }
-  return 50;
+  } catch {}
+  return cached?.rsi ?? 50;
 }
 
 export async function fetchBatchRealRsi(symbols: string[]): Promise<Record<string, number>> {
   const map: Record<string, number> = {};
-  // Batch in chunks of 5 to avoid browser network congestion
-  const chunkSize = 5;
+  // Batch in smaller chunks of 3 with slight throttle to prevent HTTP 429
+  const chunkSize = 3;
   for (let i = 0; i < symbols.length; i += chunkSize) {
     const chunk = symbols.slice(i, i + chunkSize);
+    if (i > 0) {
+      await new Promise(r => setTimeout(r, 120));
+    }
     await Promise.allSettled(
       chunk.map(async (sym) => {
         const val = await fetchRealRsi15m(sym);
@@ -587,8 +636,45 @@ export async function executeRealBitgetOrder(
     }
   } catch {}
 
-  // 2. Second priority: Direct Browser WebCrypto request (Bypasses Cloudflare Worker WAF blocks)
-  if (activeConfig?.apiKey && activeConfig?.secretKey && activeConfig?.passphrase) {
+  // 3. Priority in Browser: Cloudflare Pages Proxy Endpoint (Avoids CORS preflight failures on custom headers)
+  const isBrowserEnv = typeof window !== 'undefined' && typeof window.document !== 'undefined';
+  if (isBrowserEnv) {
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (activeConfig?.apiKey) headers['x-bitget-key'] = activeConfig.apiKey;
+      if (activeConfig?.secretKey) headers['x-bitget-secret'] = activeConfig.secretKey;
+      if (activeConfig?.passphrase) headers['x-bitget-passphrase'] = activeConfig.passphrase;
+
+      const res = await fetch('/api/bitget', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(order),
+      });
+      const json = await res.json();
+      if (res.ok && json.code === '00000') {
+        return {
+          success: true,
+          data: json.data,
+          message: `✓ [Bitget Spot Proxy] ส่งคำสั่งสำเร็จ: orderId=${json.data?.orderId || 'ok'}`,
+        };
+      } else if (json.code === '43012') {
+        return {
+          success: false,
+          message: `🚨 ยอดเงิน USDT ในกระเป๋า Spot ไม่เพียงพอ (Bitget Error 43012: Insufficient balance)`,
+        };
+      } else if (json.code) {
+        return {
+          success: false,
+          message: `Bitget API (${json.code}): ${json.msg || 'Order failed'}`,
+        };
+      }
+    } catch {}
+  }
+
+  // 4. Fallback: Direct WebCrypto request (for desktop/Node/Electron where cross-origin CORS is not enforced)
+  if (!isBrowserEnv && activeConfig?.apiKey && activeConfig?.secretKey && activeConfig?.passphrase) {
     try {
       const timestamp = Date.now().toString();
       const requestPath = '/api/v2/spot/trade/place-order';
@@ -638,42 +724,14 @@ export async function executeRealBitgetOrder(
         };
       }
     } catch (directErr) {
-      console.warn('Direct Bitget call failed, falling back to Pages proxy:', directErr);
+      console.warn('Direct Bitget call failed:', directErr);
     }
   }
 
-  // 2. Fallback: Cloudflare Pages Proxy Endpoint
-  try {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-    if (config?.apiKey) headers['x-bitget-key'] = config.apiKey;
-    if (config?.secretKey) headers['x-bitget-secret'] = config.secretKey;
-    if (config?.passphrase) headers['x-bitget-passphrase'] = config.passphrase;
-
-    const res = await fetch('/api/bitget', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(order),
-    });
-    const json = await res.json();
-    if (!res.ok || json.code !== '00000') {
-      return {
-        success: false,
-        message: `Bitget API Error (${json.code || res.status}): ${json.msg || 'Order failed'}`,
-      };
-    }
-    return {
-      success: true,
-      data: json.data,
-      message: `Bitget Order Success: orderId=${json.data?.orderId || 'ok'}`,
-    };
-  } catch (err: any) {
-    return {
-      success: false,
-      message: `Network error placing Bitget order: ${err.message}`,
-    };
-  }
+  return {
+    success: false,
+    message: 'ไม่สามารถส่งคำสั่งได้: กรุณาตรวจสอบการตั้งค่า Bitget API หรือเครือข่าย',
+  };
 }
 
 // Browser WebSocket Asset Fetcher (Bypasses Cloudflare WAF & CORS via AWS CloudFront endpoint)
@@ -804,8 +862,41 @@ export async function fetchRealBitgetAssets(config?: BitgetConfig): Promise<{
     }
   }
 
-  // 2. Second priority: Direct Browser WebCrypto request
-  if (activeConfig?.apiKey && activeConfig?.secretKey && activeConfig?.passphrase) {
+  // 2. Second priority in Browser: Cloudflare Pages Proxy Endpoint (Safe from browser CORS preflight blocks)
+  const isBrowserEnv = typeof window !== 'undefined' && typeof window.document !== 'undefined';
+  if (isBrowserEnv) {
+    try {
+      const headers: Record<string, string> = {};
+      if (activeConfig?.apiKey) headers['x-bitget-key'] = activeConfig.apiKey;
+      if (activeConfig?.secretKey) headers['x-bitget-secret'] = activeConfig.secretKey;
+      if (activeConfig?.passphrase) headers['x-bitget-passphrase'] = activeConfig.passphrase;
+
+      const res = await fetch('/api/bitget?action=assets', { headers });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.code === '00000' && Array.isArray(json.data)) {
+          let usdtAvailable = 0;
+          const assets: Array<{ coin: string; available: number; frozen: number }> = [];
+
+          for (const item of json.data) {
+            const coin = item.coin || '';
+            const avail = parseFloat(item.available || '0');
+            const frozen = parseFloat(item.frozen || '0');
+            if (coin === 'USDT') {
+              usdtAvailable = avail;
+            }
+            if (avail > 0 || frozen > 0) {
+              assets.push({ coin, available: avail, frozen });
+            }
+          }
+          return { usdtAvailable, assets };
+        }
+      }
+    } catch {}
+  }
+
+  // 3. Fallback: Direct WebCrypto request (for desktop/Node/Electron)
+  if (!isBrowserEnv && activeConfig?.apiKey && activeConfig?.secretKey && activeConfig?.passphrase) {
     try {
       const timestamp = Date.now().toString();
       const requestPath = '/api/v2/spot/account/assets';
@@ -837,40 +928,11 @@ export async function fetchRealBitgetAssets(config?: BitgetConfig): Promise<{
         return { usdtAvailable, assets };
       }
     } catch (err) {
-      console.warn('Direct assets fetch failed, falling back to proxy:', err);
+      console.warn('Direct assets fetch failed:', err);
     }
   }
 
-  // 3. Fallback: Cloudflare Pages Proxy Endpoint
-  try {
-    const headers: Record<string, string> = {};
-    if (activeConfig?.apiKey) headers['x-bitget-key'] = activeConfig.apiKey;
-    if (activeConfig?.secretKey) headers['x-bitget-secret'] = activeConfig.secretKey;
-    if (activeConfig?.passphrase) headers['x-bitget-passphrase'] = activeConfig.passphrase;
-
-    const res = await fetch('/api/bitget?action=assets', { headers });
-    if (!res.ok) return null;
-    const json = await res.json();
-    if (json.code !== '00000' || !Array.isArray(json.data)) return null;
-
-    let usdtAvailable = 0;
-    const assets: Array<{ coin: string; available: number; frozen: number }> = [];
-
-    for (const item of json.data) {
-      const coin = item.coin || '';
-      const avail = parseFloat(item.available || '0');
-      const frozen = parseFloat(item.frozen || '0');
-      if (coin === 'USDT') {
-        usdtAvailable = avail;
-      }
-      if (avail > 0 || frozen > 0) {
-        assets.push({ coin, available: avail, frozen });
-      }
-    }
-    return { usdtAvailable, assets };
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 // Fetch and map genuine Bitget Spot wallet assets to SpotHolding objects with live valuation
@@ -1094,9 +1156,29 @@ export async function fetchRealBitgetOrderHistory(
   }
 
   const queryParams = symbol ? `symbol=${symbol}&limit=50` : 'limit=50';
+  const isBrowserEnv = typeof window !== 'undefined' && typeof window.document !== 'undefined';
 
-  // 1. Direct Browser WebCrypto request
-  if (activeConfig?.apiKey && activeConfig?.secretKey && activeConfig?.passphrase) {
+  // 1. Primary in Browser: Cloudflare Pages Proxy (Zero CORS preflight error)
+  if (isBrowserEnv) {
+    try {
+      const headers: Record<string, string> = {};
+      if (activeConfig?.apiKey) headers['x-bitget-key'] = activeConfig.apiKey;
+      if (activeConfig?.secretKey) headers['x-bitget-secret'] = activeConfig.secretKey;
+      if (activeConfig?.passphrase) headers['x-bitget-passphrase'] = activeConfig.passphrase;
+
+      const proxyUrl = `/api/bitget?action=history${symbol ? `&symbol=${symbol}` : ''}&limit=50`;
+      const res = await fetch(proxyUrl, { headers });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.code === '00000' && Array.isArray(json.data)) {
+          return json.data;
+        }
+      }
+    } catch {}
+  }
+
+  // 2. Fallback: Direct WebCrypto request (for desktop/Node/Electron where cross-origin CORS is not enforced)
+  if (!isBrowserEnv && activeConfig?.apiKey && activeConfig?.secretKey && activeConfig?.passphrase) {
     try {
       const timestamp = Date.now().toString();
       const requestPath = '/api/v2/spot/trade/history-orders';
@@ -1125,28 +1207,11 @@ export async function fetchRealBitgetOrderHistory(
         return directJson.data;
       }
     } catch (err) {
-      console.warn('Direct order history fetch failed, falling back to proxy:', err);
+      console.warn('Direct order history fetch failed:', err);
     }
   }
 
-  // 2. Fallback: Cloudflare Pages / Next.js Proxy Endpoint
-  try {
-    const headers: Record<string, string> = {};
-    if (activeConfig?.apiKey) headers['x-bitget-key'] = activeConfig.apiKey;
-    if (activeConfig?.secretKey) headers['x-bitget-secret'] = activeConfig.secretKey;
-    if (activeConfig?.passphrase) headers['x-bitget-passphrase'] = activeConfig.passphrase;
-
-    const proxyUrl = `/api/bitget?action=history${symbol ? `&symbol=${symbol}` : ''}`;
-    const res = await fetch(proxyUrl, { headers });
-    if (!res.ok) return [];
-    const json = await res.json();
-    if (json.code === '00000' && Array.isArray(json.data)) {
-      return json.data;
-    }
-    return [];
-  } catch {
-    return [];
-  }
+  return [];
 }
 
 // Load Spot Holdings (Separated by Paper vs Live mode)

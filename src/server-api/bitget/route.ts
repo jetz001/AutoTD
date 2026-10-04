@@ -38,7 +38,11 @@ export async function GET(req: NextRequest) {
       requestPath = `/api/v2/spot/trade/unfilled-orders${symbol ? `?symbol=${symbol}` : ""}`;
     } else if (action === "history") {
       const symbol = searchParams.get("symbol") || "";
-      requestPath = `/api/v2/spot/trade/history-orders${symbol ? `?symbol=${symbol}` : ""}`;
+      const limit = searchParams.get("limit") || "50";
+      const q: string[] = [];
+      if (symbol) q.push(`symbol=${symbol}`);
+      if (limit) q.push(`limit=${limit}`);
+      requestPath = `/api/v2/spot/trade/history-orders${q.length ? `?${q.join("&")}` : ""}`;
     }
 
     const timestamp = Date.now().toString();

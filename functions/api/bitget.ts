@@ -108,6 +108,20 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       );
     }
 
+    if (action === "candles") {
+      try {
+        const symbol = url.searchParams.get("symbol") || "";
+        const granularity = url.searchParams.get("granularity") || "15min";
+        const limit = url.searchParams.get("limit") || "100";
+        const targetUrl = `${BITGET_HOST}/api/v2/spot/market/candles?symbol=${symbol}&granularity=${granularity}&limit=${limit}`;
+        const res = await fetch(targetUrl);
+        const data = await res.json();
+        return Response.json(data, { headers: corsHeaders });
+      } catch (err: any) {
+        return Response.json({ code: "50000", msg: err.message }, { status: 500, headers: corsHeaders });
+      }
+    }
+
     const { apiKey, secretKey, passphrase } = await getCredentials(request, env);
     if (!apiKey || !secretKey || !passphrase) {
       return Response.json(
@@ -126,8 +140,12 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         if (symbol) queryString = `symbol=${symbol}`;
       } else if (action === "history") {
         const symbol = url.searchParams.get("symbol") || "";
+        const limit = url.searchParams.get("limit") || "50";
         requestPath = "/api/v2/spot/trade/history-orders";
-        if (symbol) queryString = `symbol=${symbol}`;
+        const qParts: string[] = [];
+        if (symbol) qParts.push(`symbol=${symbol}`);
+        if (limit) qParts.push(`limit=${limit}`);
+        queryString = qParts.join("&");
       } else if (action === "check") {
         requestPath = "/api/v2/spot/account/assets";
       }
