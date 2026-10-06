@@ -64,12 +64,14 @@ export function CryptoPageClient() {
   const [quantState, setQuantState] = React.useState<QuantExecutiveState>(() => {
     const isPaper = config.isPaperTrading ?? true
     const initHoldings = loadSpotHoldings(isPaper)
+    const { active: initActive, dust: initDust } = filterActiveAndDustHoldings(initHoldings)
     return {
       status: "SCANNING",
       statusMessage: "กำลังสแกนตลาด Top Spot Bitget เพื่อหาจังหวะ Dip in Uptrend",
       roundGoalPercent: config.takeProfitPercent,
       currentRoundProgressPercent: 0,
-      activeCoinsCount: initHoldings.length,
+      activeCoinsCount: initActive.length,
+      dustCoinsCount: initDust.length,
       maxCoinsLimit: config.maxCoins,
       totalDeployedUsdt: 0,
       cashReserveUsdt: isPaper ? getPaperBalance() : 0,
@@ -153,6 +155,7 @@ export function CryptoPageClient() {
             : loadQuantLogs(false)
           
           saveQuantLogs(cloudLiveLogs, false)
+          const { active: initLiveActive, dust: initLiveDust } = filterActiveAndDustHoldings(initialHoldings)
           setQuantState((prev) => ({
             ...prev,
             cashReserveUsdt: 0,
@@ -164,7 +167,8 @@ export function CryptoPageClient() {
               note: String(l.note || l.message || ''),
               color: String(l.color || '#38bdf8'),
             })),
-            activeCoinsCount: initialHoldings.length,
+            activeCoinsCount: initLiveActive.length,
+            dustCoinsCount: initLiveDust.length,
           }))
 
           try {
@@ -174,13 +178,15 @@ export function CryptoPageClient() {
               setHoldings(cleanHoldings)
               saveSpotHoldings(cleanHoldings, false)
             }
+            const { active: cleanActive, dust: cleanDust } = filterActiveAndDustHoldings(cleanHoldings)
             setQuantState((prev) => ({
               ...prev,
               cashReserveUsdt: realData.usdtAvailable,
               totalDeployedUsdt: Math.max(0, realData.totalUsdValue - realData.usdtAvailable),
-              activeCoinsCount: cleanHoldings.length,
-              statusMessage: cleanHoldings.length > 0
-                ? `พอร์ต Bitget Spot รวม $${realData.totalUsdValue.toFixed(2)} USD (${cleanHoldings.map((h) => h.baseCoin).join(", ")}) | ยอด USDT ว่าง $${realData.usdtAvailable.toFixed(2)}`
+              activeCoinsCount: cleanActive.length,
+              dustCoinsCount: cleanDust.length,
+              statusMessage: cleanActive.length > 0
+                ? `พอร์ต Bitget Spot รวม $${realData.totalUsdValue.toFixed(2)} USD (${cleanActive.map((h) => h.baseCoin).join(", ")}) | ยอด USDT ว่าง $${realData.usdtAvailable.toFixed(2)}`
                 : `ยอด USDT ใน Bitget Spot: $${realData.usdtAvailable.toFixed(2)}`,
             }))
           } catch {}
@@ -221,12 +227,14 @@ export function CryptoPageClient() {
       // Paper Mode
       const paperBal = getPaperBalance()
       const modeHoldings = loadSpotHoldings(true)
+      const { active: modeActive, dust: modeDust } = filterActiveAndDustHoldings(modeHoldings)
       setHoldings(modeHoldings)
       setQuantState((prev) => ({
         ...prev,
         cashReserveUsdt: paperBal,
         recentLogs: modeLogs,
-        activeCoinsCount: modeHoldings.length,
+        activeCoinsCount: modeActive.length,
+        dustCoinsCount: modeDust.length,
       }))
       setActionAlert("🛡️ สลับเป็นโหมดจำลอง (Paper Trading) แล้ว | บัญชีปลอดภัย ไม่เสียเงินจริง")
     } else {
@@ -236,6 +244,7 @@ export function CryptoPageClient() {
         cashReserveUsdt: 0,
         recentLogs: modeLogs,
         activeCoinsCount: 0,
+        dustCoinsCount: 0,
       }))
       setActionAlert("🔥 สลับเป็นโหมดเทรดจริง (Live Bitget Spot) | กำลังซิงค์เหรียญและกระเป๋าเงินจริง...")
       try {
@@ -245,13 +254,15 @@ export function CryptoPageClient() {
         if (cleanHoldings.length > 0) {
           saveSpotHoldings(cleanHoldings, false)
         }
+        const { active: cleanActive, dust: cleanDust } = filterActiveAndDustHoldings(cleanHoldings)
         setQuantState((prev) => ({
           ...prev,
           cashReserveUsdt: realData.usdtAvailable,
           totalDeployedUsdt: Math.max(0, realData.totalUsdValue - realData.usdtAvailable),
-          activeCoinsCount: cleanHoldings.length,
-          statusMessage: realData.holdings.length > 0
-            ? `พอร์ต Bitget Spot รวม $${realData.totalUsdValue.toFixed(2)} USD (${realData.holdings.map((h) => h.baseCoin).join(", ")}) | ยอด USDT ว่าง $${realData.usdtAvailable.toFixed(2)}`
+          activeCoinsCount: cleanActive.length,
+          dustCoinsCount: cleanDust.length,
+          statusMessage: cleanActive.length > 0
+            ? `พอร์ต Bitget Spot รวม $${realData.totalUsdValue.toFixed(2)} USD (${cleanActive.map((h) => h.baseCoin).join(", ")}) | ยอด USDT ว่าง $${realData.usdtAvailable.toFixed(2)}`
             : `ยอด USDT ใน Bitget Spot: $${realData.usdtAvailable.toFixed(2)}`,
         }))
         setActionAlert(
@@ -312,15 +323,17 @@ export function CryptoPageClient() {
 
         // If in Real Live Mode, sync actual USDT balance and real portfolio valuation
         if (!config.isPaperTrading) {
+          const { active: updatedActive, dust: updatedDust } = filterActiveAndDustHoldings(updatedHoldings)
           const realAcc = await fetchRealBitgetAssets(config)
           const availCash = realAcc ? realAcc.usdtAvailable : 0
           overallState.cashReserveUsdt = availCash
           overallState.totalDeployedUsdt = Math.max(0, liveTotalValuation - availCash)
-          overallState.activeCoinsCount = updatedHoldings.length
+          overallState.activeCoinsCount = updatedActive.length
+          overallState.dustCoinsCount = updatedDust.length
 
           if (availCash < 5) {
-            overallState.statusMessage = updatedHoldings.length > 0
-              ? `พอร์ต Bitget Spot รวม $${liveTotalValuation.toFixed(2)} USD (${updatedHoldings.map((h) => h.baseCoin).join(", ")}) | ยอด USDT ว่าง $${availCash.toFixed(2)} (ต้องการขั้นต่ำ $10 เพื่อเปิดไม้ใหม่)`
+            overallState.statusMessage = updatedActive.length > 0
+              ? `พอร์ต Bitget Spot รวม $${liveTotalValuation.toFixed(2)} USD (${updatedActive.map((h) => h.baseCoin).join(", ")}) | ยอด USDT ว่าง $${availCash.toFixed(2)} (ต้องการขั้นต่ำ $10 เพื่อเปิดไม้ใหม่)`
               : `ยอด USDT ใน Bitget Spot คือ $0.00 (ต้องการขั้นต่ำ $10 เพื่อให้ Quant เปิดไม้เทรด)`
           }
         }
@@ -765,15 +778,16 @@ export function CryptoPageClient() {
 
   // Action 1: Take Profit All
   const handleTakeProfitAll = async () => {
-    if (holdings.length === 0) {
-      alert("ไม่มีเหรียญในพอร์ตที่สามารถขายทำกำไรได้")
+    const { active: activeHoldings } = filterActiveAndDustHoldings(holdings)
+    if (activeHoldings.length === 0) {
+      alert("ไม่มีเหรียญหลักในพอร์ตที่สามารถขายทำกำไรได้ (มีเฉพาะเศษเหรียญต่ำกว่า $3)")
       return
     }
-    if (!confirm(`ยืนยันการขายทำกำไรทุกเหรียญ (${holdings.length} เหรียญ) ด้วยราคาตลาดทันที?`)) return
+    if (!confirm(`ยืนยันการขายทำกำไรทุกเหรียญหลัก (${activeHoldings.length} เหรียญ) ด้วยราคาตลาดทันที?`)) return
 
     let totalRealized = 0
     let currentH = [...holdings]
-    for (const h of holdings) {
+    for (const h of activeHoldings) {
       const res = await executeSpotSell(h.symbol, h.currentPrice, false, config)
       totalRealized += res.realizedPnl
       currentH = res.updatedHoldings
@@ -786,14 +800,15 @@ export function CryptoPageClient() {
 
   // Action 2: Emergency Panic Cut Loss & Cooldown
   const handleEmergencyPanicCutLoss = async () => {
-    if (holdings.length === 0) {
-      alert("ไม่มีเหรียญในพอร์ตที่ต้องคัทลอส")
+    const { active: activeHoldings } = filterActiveAndDustHoldings(holdings)
+    if (activeHoldings.length === 0) {
+      alert("ไม่มีเหรียญหลักในพอร์ตที่ต้องคัทลอส (มีเฉพาะเศษเหรียญต่ำกว่า $3)")
       return
     }
-    if (!confirm(`🚨 คำเตือนความเสี่ยง: ยืนยันการคัทลอสฉุกเฉินปิดพอร์ต 100% ทุกเหรียญ (${holdings.length} เหรียญ) และล็อค Cooldown 3 ชม. ห้ามเข้าไม้ซ้ำ?`)) return
+    if (!confirm(`🚨 คำเตือนความเสี่ยง: ยืนยันการคัทลอสฉุกเฉินปิดพอร์ต 100% ทุกเหรียญหลัก (${activeHoldings.length} เหรียญ) และล็อค Cooldown 3 ชม. ห้ามเข้าไม้ซ้ำ?`)) return
 
     let currentH = [...holdings]
-    for (const h of holdings) {
+    for (const h of activeHoldings) {
       const res = await executeSpotSell(h.symbol, h.currentPrice, true, config)
       currentH = res.updatedHoldings
     }
@@ -976,7 +991,7 @@ export function CryptoPageClient() {
             size="sm"
             variant="outline"
             onClick={handleTakeProfitAll}
-            disabled={holdings.length === 0}
+            disabled={filterActiveAndDustHoldings(holdings).active.length === 0}
             className="h-7 sm:h-8 gap-1 text-[11px] sm:text-xs font-bold text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 justify-center"
           >
             <Zap className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
@@ -988,7 +1003,7 @@ export function CryptoPageClient() {
             size="sm"
             variant="outline"
             onClick={handleEmergencyPanicCutLoss}
-            disabled={holdings.length === 0}
+            disabled={filterActiveAndDustHoldings(holdings).active.length === 0}
             className="h-7 sm:h-8 gap-1 text-[11px] sm:text-xs font-bold text-rose-400 border-rose-500/40 hover:bg-rose-500/10 justify-center"
           >
             <ShieldAlert className="h-3 w-3 sm:h-3.5 sm:w-3.5" />

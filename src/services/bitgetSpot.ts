@@ -1335,8 +1335,9 @@ export async function executeSpotBuyTranche(
       updatedHoldings: holdings,
     };
   } else {
-    // Check max coins guardrail
-    if (holdings.length >= config.maxCoins) {
+    // Check max coins guardrail (exclude dust < $3.00)
+    const { active: activeHoldings } = filterActiveAndDustHoldings(holdings);
+    if (activeHoldings.length >= config.maxCoins) {
       return {
         success: false,
         message: `พอร์ตถือเหรียญครบโควตา ${config.maxCoins} ตัวแล้ว ไม่สามารถเปิดเหรียญใหม่ได้`,

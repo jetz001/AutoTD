@@ -1,6 +1,6 @@
 // Autonomous Quant Commander Decision Engine
 import type { SpotTickerItem, SpotHolding, BitgetConfig } from './bitgetSpot';
-import { isUnderCooldown } from './bitgetSpot';
+import { isUnderCooldown, filterActiveAndDustHoldings } from './bitgetSpot';
 
 export interface QuantDecision {
   action: 'BUY_TRANCHE' | 'TAKE_PROFIT' | 'CUT_LOSS' | 'HOLD_SCANNING' | 'TIME_EXTEND' | 'TIME_CLOSE' | 'REVISE_TARGET';
@@ -19,6 +19,7 @@ export interface QuantExecutiveState {
   roundGoalPercent: number; // e.g. 5.0%
   currentRoundProgressPercent: number; // e.g. 3.2%
   activeCoinsCount: number;
+  dustCoinsCount?: number;
   maxCoinsLimit: number;
   totalDeployedUsdt: number;
   cashReserveUsdt: number;
@@ -251,8 +252,10 @@ export function runQuantPortfolioCheck(
   let status: QuantExecutiveState['status'] = 'SCANNING';
   let statusMessage = 'กำลังสแกนตลาด Top 20 Spot Bitget เพื่อหาจังหวะ Dip in Uptrend';
 
-  // 1. Check each holding for Cut Loss or Take Profit or DCA Tranche
-  for (const h of holdings) {
+  const { active: activeHoldings, dust: dustHoldings } = filterActiveAndDustHoldings(holdings || []);
+
+  // 1. Check each active holding for Cut Loss or Take Profit or DCA Tranche
+  for (const h of activeHoldings) {
     // 1.1 Cut-Loss Check (-5% from Weighted Avg Cost)
     if (h.currentPrice <= h.cutLossPrice) {
       decision = {
@@ -392,8 +395,8 @@ export function runQuantPortfolioCheck(
   }
 
   // 2. If no holding action and portfolio has capacity (< maxCoins), check screened candidates
-  if (!decision && holdings.length < config.maxCoins && screenedCandidates && screenedCandidates.length > 0) {
-    const heldSymbols = new Set(holdings.map(h => h.symbol));
+  if (!decision && activeHoldings.length < config.maxCoins && screenedCandidates && screenedCandidates.length > 0) {
+    const heldSymbols = new Set(activeHoldings.map(h => h.symbol));
     const buyableCandidates = screenedCandidates
       .filter(c => !heldSymbols.has(c.symbol) && !isUnderCooldown(c.symbol) && ((c.aiScore || 0) >= 80 || c.signal === 'BUY_DIP'))
       .sort((a, b) => (b.aiScore || 0) - (a.aiScore || 0));
@@ -414,15 +417,15 @@ export function runQuantPortfolioCheck(
   }
 
   // Calculate total deployed vs cash
-  const totalDeployed = (holdings || []).reduce((sum, h) => sum + (h.totalInvestedUsdt || 0), 0);
-  const totalUnrealizedPnl = (holdings || []).reduce((sum, h) => sum + (h.unrealizedPnlUsdt || 0), 0);
-  const avgPnlPct = (holdings && holdings.length > 0)
-    ? holdings.reduce((sum, h) => sum + (h.pnlPercent || 0), 0) / holdings.length
+  const totalDeployed = (activeHoldings || []).reduce((sum, h) => sum + (h.totalInvestedUsdt || 0), 0);
+  const totalUnrealizedPnl = (activeHoldings || []).reduce((sum, h) => sum + (h.unrealizedPnlUsdt || 0), 0);
+  const avgPnlPct = (activeHoldings && activeHoldings.length > 0)
+    ? activeHoldings.reduce((sum, h) => sum + (h.pnlPercent || 0), 0) / activeHoldings.length
     : 0;
 
-  if (holdings.length > 0 && status === 'SCANNING') {
+  if (activeHoldings.length > 0 && status === 'SCANNING') {
     status = 'ACCUMULATING';
-    statusMessage = `ถือครอง ${holdings.length}/${config.maxCoins} เหรียญ กำไรเฉลี่ย ${avgPnlPct >= 0 ? '+' : ''}${avgPnlPct.toFixed(2)}% (เป้าหมาย +${config.takeProfitPercent}%)`;
+    statusMessage = `ถือครอง ${activeHoldings.length}/${config.maxCoins} เหรียญ กำไรเฉลี่ย ${avgPnlPct >= 0 ? '+' : ''}${avgPnlPct.toFixed(2)}% (เป้าหมาย +${config.takeProfitPercent}%)`;
   }
 
   const overallState: QuantExecutiveState = {
@@ -430,7 +433,8 @@ export function runQuantPortfolioCheck(
     statusMessage,
     roundGoalPercent: config.takeProfitPercent,
     currentRoundProgressPercent: Math.max(0, avgPnlPct),
-    activeCoinsCount: holdings.length,
+    activeCoinsCount: activeHoldings.length,
+    dustCoinsCount: dustHoldings.length,
     maxCoinsLimit: config.maxCoins,
     totalDeployedUsdt: totalDeployed,
     cashReserveUsdt: isPaper ? Math.max(0, 10000 - totalDeployed + totalUnrealizedPnl) : 0,

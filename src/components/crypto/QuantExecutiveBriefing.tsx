@@ -58,6 +58,11 @@ export function QuantExecutiveBriefing({ state, config }: Props) {
             </span>
             <span className="font-bold text-foreground font-mono text-xs">
               ถือ {state.activeCoinsCount} / {config.maxCoins} เหรียญ
+              {typeof state.dustCoinsCount === "number" && state.dustCoinsCount > 0 && (
+                <span className="text-[10px] text-muted-foreground font-normal ml-1">
+                  (เศษ {state.dustCoinsCount})
+                </span>
+              )}
             </span>
           </div>
           <div className="grid grid-cols-2 gap-2 mt-2 text-[11px]">
