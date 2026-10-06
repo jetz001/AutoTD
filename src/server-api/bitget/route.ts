@@ -43,6 +43,8 @@ export async function GET(req: NextRequest) {
       if (symbol) q.push(`symbol=${symbol}`);
       if (limit) q.push(`limit=${limit}`);
       requestPath = `/api/v2/spot/trade/history-orders${q.length ? `?${q.join("&")}` : ""}`;
+    } else if (action === "bgb-convert-list") {
+      requestPath = "/api/v2/convert/bgb-convert-coin-list";
     }
 
     const timestamp = Date.now().toString();
@@ -67,7 +69,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST: Place Spot Order
+// POST: Place Spot Order / BGB Convert
 export async function POST(req: NextRequest) {
   const { apiKey, secretKey, passphrase } = getCredentials(req);
   if (!apiKey || !secretKey || !passphrase) {
@@ -76,8 +78,18 @@ export async function POST(req: NextRequest) {
 
   try {
     const payload = await req.json();
-    const requestPath = "/api/v2/spot/trade/place-order";
-    const bodyStr = JSON.stringify(payload);
+    const { searchParams } = new URL(req.url);
+    const action = searchParams.get("action") || payload.action || "";
+
+    let requestPath = "/api/v2/spot/trade/place-order";
+    let bodyPayload = payload;
+
+    if (action === "bgb-convert") {
+      requestPath = "/api/v2/convert/bgb-convert";
+      bodyPayload = { coinList: payload.coinList || [] };
+    }
+
+    const bodyStr = JSON.stringify(bodyPayload);
     const timestamp = Date.now().toString();
     const sign = signBitgetRequest(timestamp, "POST", requestPath, bodyStr, secretKey);
 

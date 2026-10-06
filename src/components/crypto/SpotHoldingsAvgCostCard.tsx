@@ -18,7 +18,13 @@ import {
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { filterActiveAndDustHoldings, type SpotHolding, type BitgetConfig } from "@/services/bitgetSpot"
+import { 
+  filterActiveAndDustHoldings, 
+  executeBgbConvert, 
+  DUST_VALUATION_THRESHOLD,
+  type SpotHolding, 
+  type BitgetConfig 
+} from "@/services/bitgetSpot"
 
 export const indicatorLabelMap: Record<string, { label: string; desc: string; color: string }> = {
   SUPERTREND_STOCH_CROSS: {
@@ -127,7 +133,26 @@ export function SpotHoldingsAvgCostCard({
   }, [holdings])
 
   const [isDustDrawerOpen, setIsDustDrawerOpen] = React.useState(false)
+  const [isConvertingBgb, setIsConvertingBgb] = React.useState(false)
+  const [bgbMsg, setBgbMsg] = React.useState<{ text: string; ok: boolean } | null>(null)
   const [editingHolding, setEditingHolding] = React.useState<SpotHolding | null>(null)
+
+  const handleConvertAllToBgb = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (dustHoldings.length === 0 || isConvertingBgb) return
+    setIsConvertingBgb(true)
+    setBgbMsg(null)
+    try {
+      const coins = dustHoldings.map((d) => d.baseCoin).filter(Boolean)
+      const res = await executeBgbConvert(coins, config)
+      setBgbMsg({ text: res.message, ok: res.success })
+    } catch (err: any) {
+      setBgbMsg({ text: `เกิดข้อผิดพลาด: ${err.message}`, ok: false })
+    } finally {
+      setIsConvertingBgb(false)
+      setTimeout(() => setBgbMsg(null), 7000)
+    }
+  }
   const [editTpPrice, setEditTpPrice] = React.useState<string>("")
   const [editSlPrice, setEditSlPrice] = React.useState<string>("")
   const [editMaxHoldMinutes, setEditMaxHoldMinutes] = React.useState<number>(180)
@@ -437,24 +462,43 @@ export function SpotHoldingsAvgCostCard({
           </div>
         )}
 
-        {/* Collapsible Foldable Drawer for Dust Balances (< $1.00) */}
+        {/* Collapsible Foldable Drawer for Dust Balances (< $3.00) */}
         {dustHoldings.length > 0 && (
           <div className="border-t border-border/40 bg-muted/20 px-3 py-2 text-xs">
-            <button
-              onClick={() => setIsDustDrawerOpen(!isDustDrawerOpen)}
-              className="flex items-center justify-between w-full text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <div className="flex items-center gap-1.5">
-                <span>🧹 เศษเหรียญค้างพอร์ต (&lt; $1.00)</span>
+            <div className="flex items-center justify-between w-full">
+              <button
+                onClick={() => setIsDustDrawerOpen(!isDustDrawerOpen)}
+                className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <span>🧹 เศษเหรียญค้างพอร์ต (&lt; ${DUST_VALUATION_THRESHOLD}.00)</span>
                 <span className="rounded bg-muted px-1.5 py-0.2 text-[9px] font-mono text-muted-foreground">
                   {dustHoldings.length} รายการ (ไม่นับรวมโควตา)
                 </span>
+                {isDustDrawerOpen ? <ChevronUp className="h-3 w-3 ml-1" /> : <ChevronDown className="h-3 w-3 ml-1" />}
+              </button>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleConvertAllToBgb}
+                  disabled={isConvertingBgb}
+                  className="h-6 px-2 text-[10px] bg-purple-500/10 text-purple-400 border-purple-500/30 hover:bg-purple-500/20 hover:text-purple-300 font-semibold gap-1"
+                  title="แปลงเศษเหรียญทั้งหมดเป็น BGB ผ่าน Bitget API (โควตากระดาน 1 ครั้ง/6 ชม.)"
+                >
+                  <Zap className={`h-3 w-3 ${isConvertingBgb ? "animate-spin" : ""}`} />
+                  {isConvertingBgb ? "กำลังแปลง..." : "แปลงเศษเป็น BGB"}
+                </Button>
               </div>
-              <div className="flex items-center gap-1 text-[10px]">
-                <span>{isDustDrawerOpen ? "ซ่อน" : "ดูรายการ"}</span>
-                {isDustDrawerOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            </div>
+
+            {bgbMsg && (
+              <div className={`mt-2 rounded p-1.5 text-[10px] font-mono ${
+                bgbMsg.ok ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30" : "bg-amber-500/15 text-amber-400 border border-amber-500/30"
+              }`}>
+                {bgbMsg.text}
               </div>
-            </button>
+            )}
 
             {isDustDrawerOpen && (
               <div className="mt-2 space-y-1.5 max-h-32 overflow-y-auto pr-1">
@@ -478,9 +522,9 @@ export function SpotHoldingsAvgCostCard({
                         variant="ghost"
                         onClick={() => onSellHolding(dh.symbol, dh.currentPrice || 0, true)}
                         className="h-5 px-1.5 text-[9px] text-rose-400 hover:text-rose-300 hover:bg-rose-500/10"
-                        title="ขายเศษเหรียญนี้ทิ้ง"
+                        title="ล้างเหรียญนี้ออกจากตาราง"
                       >
-                        ล้างเศษ
+                        ล้าง
                       </Button>
                     </div>
                   </div>

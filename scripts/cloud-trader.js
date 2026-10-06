@@ -311,7 +311,7 @@ async function runAutopilotCycle() {
   let { usdtAvailable, assets } = assetData;
   console.log(`Available USDT: $${usdtAvailable.toFixed(4)}`);
 
-  // Separate Active Holdings (val >= $1.00 USD) from Dust (< $1.00 USD)
+  // Separate Active Holdings (val >= $3.00 USD) from Dust (< $3.00 USD)
   const allHoldings = [];
   for (const a of assets) {
     if (a.coin === 'USDT') continue;
@@ -329,15 +329,131 @@ async function runAutopilotCycle() {
     }
   }
 
-  const holdings = allHoldings.filter(h => h.valUsd >= 1.00);
-  const dustHoldings = allHoldings.filter(h => h.valUsd < 1.00);
+  const holdings = allHoldings.filter(h => h.valUsd >= 3.00);
+  const dustHoldings = allHoldings.filter(h => h.valUsd < 3.00);
 
   console.log(`Active Spot Holdings (${holdings.length}/${config.maxCoins || 4}):`, holdings.map(h => `${h.baseCoin} ($${h.valUsd.toFixed(2)})`).join(', ') || 'None');
   if (dustHoldings.length > 0) {
-    console.log(`Dust coins (< $1.00):`, dustHoldings.map(d => `${d.baseCoin} ($${d.valUsd.toFixed(4)})`).join(', '));
+    console.log(`Dust coins (< $3.00):`, dustHoldings.map(d => `${d.baseCoin} ($${d.valUsd.toFixed(4)})`).join(', '));
   }
 
   const newLogs = [];
+
+  // ==========================================
+  // 3.5 AUTONOMOUS DUST RECYCLING (Dust -> BGB -> USDT)
+  // ==========================================
+  async function recycleDustToBgbAndUsdt() {
+    try {
+      const timestamp = Date.now().toString();
+      const requestPath = '/api/v2/convert/bgb-convert-coin-list';
+      const sign = signBitgetRequest(timestamp, 'GET', requestPath, '', '', config.secretKey);
+      const listRes = await fetch(`${BITGET_HOST}${requestPath}`, {
+        headers: {
+          'ACCESS-KEY': config.apiKey,
+          'ACCESS-SIGN': sign,
+          'ACCESS-TIMESTAMP': timestamp,
+          'ACCESS-PASSPHRASE': config.passphrase,
+          'Content-Type': 'application/json',
+          'locale': 'en-US'
+        }
+      });
+      const listJson = await listRes.json();
+      if (listJson.code === '00000' && Array.isArray(listJson.data?.coinList)) {
+        const activeCoins = new Set(
+          (holdings || []).map(h => h.baseCoin || h.symbol?.replace('USDT', ''))
+        );
+        (config.liveHoldings || []).forEach(h => {
+          if (((h.totalAmount || 0) * (h.currentPrice || priceMap[h.symbol] || 0)) >= 3.00) {
+            activeCoins.add(h.baseCoin || h.symbol?.replace('USDT', ''));
+          }
+        });
+        activeCoins.add('USDT');
+        activeCoins.add('BGB');
+
+        const dustCoinsToConvert = listJson.data.coinList
+          .map(c => c.coin)
+          .filter(c => !activeCoins.has(c));
+
+        if (dustCoinsToConvert.length > 0) {
+          console.log(`[Dust Recycler] Attempting BGB conversion for: ${dustCoinsToConvert.join(', ')}`);
+          const convertPath = '/api/v2/convert/bgb-convert';
+          const postPayload = { coinList: dustCoinsToConvert };
+          const postBody = JSON.stringify(postPayload);
+          const postTime = Date.now().toString();
+          const postSign = signBitgetRequest(postTime, 'POST', convertPath, '', postBody, config.secretKey);
+          const convertRes = await fetch(`${BITGET_HOST}${convertPath}`, {
+            method: 'POST',
+            headers: {
+              'ACCESS-KEY': config.apiKey,
+              'ACCESS-SIGN': postSign,
+              'ACCESS-TIMESTAMP': postTime,
+              'ACCESS-PASSPHRASE': config.passphrase,
+              'Content-Type': 'application/json',
+              'locale': 'en-US'
+            },
+            body: postBody
+          });
+          const convertJson = await convertRes.json();
+          if (convertJson.code === '00000') {
+            console.log(`[Dust Recycler] Converted ${dustCoinsToConvert.length} dust coins to BGB successfully!`);
+            newLogs.push({
+              id: Date.now().toString(),
+              timestamp: Date.now(),
+              time: getThaiTimeString(),
+              action: '🧹✨ [AUTO DUST CONVERT]',
+              symbol: 'BGB',
+              note: `แปลงเศษเหรียญ (${dustCoinsToConvert.join(', ')}) เป็น BGB สำเร็จ`,
+              color: '#8b5cf6'
+            });
+          } else if (convertJson.code === '13011') {
+            console.log(`[Dust Recycler] Cooldown active (1 convert every 6h): ${convertJson.msg}`);
+          } else {
+            console.warn(`[Dust Recycler] Convert response: ${convertJson.code} ${convertJson.msg}`);
+          }
+        }
+      }
+
+      // Check BGB asset and recycle to USDT if accumulated >= $5.50
+      const bgbAsset = assets.find(a => a.coin === 'BGB');
+      const bgbPrice = priceMap['BGBUSDT'] || 0;
+      const bgbAvailable = bgbAsset ? bgbAsset.available : 0;
+      const bgbValUsd = bgbAvailable * bgbPrice;
+      const isBgbActiveTrade = (config.liveHoldings || []).some(
+        h => (h.symbol === 'BGBUSDT' || h.baseCoin === 'BGB') && (((h.totalAmount || 0) * (h.avgCostPrice || bgbPrice)) >= 3.00)
+      );
+
+      if (!isBgbActiveTrade && bgbValUsd >= 5.50 && bgbPrice > 0) {
+        const sellSize = formatCoinAmount(bgbAvailable, 'BGBUSDT');
+        if (parseFloat(sellSize) > 0) {
+          console.log(`[Dust Recycler] BGB accumulated to $${bgbValUsd.toFixed(2)} USD (>= $5.50). Auto-selling to pure USDT...`);
+          const sellRes = await placeBitgetOrder({
+            symbol: 'BGBUSDT',
+            side: 'sell',
+            orderType: 'market',
+            size: sellSize
+          }, config);
+          if (sellRes.code === '00000') {
+            console.log(`[Dust Recycler] Successfully recycled BGB into USDT!`);
+            newLogs.push({
+              id: Date.now().toString(),
+              timestamp: Date.now(),
+              time: getThaiTimeString(),
+              action: '💰💵 [BGB TO USDT RECYCLE]',
+              symbol: 'BGBUSDT',
+              note: `ขาย BGB สะสม (${sellSize} BGB ≈ $${bgbValUsd.toFixed(2)}) คืนเป็นเงินสด USDT สำเร็จ`,
+              color: '#10b981'
+            });
+          } else {
+            console.warn(`[Dust Recycler] Failed to sell BGB to USDT:`, sellRes.code, sellRes.msg);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[Dust Recycler] Error during dust recycling:`, err.message);
+    }
+  }
+
+  await recycleDustToBgbAndUsdt();
 
   // ==========================================
   // 4. ON-DEMAND DIRECT ACTIONS (Manual Sell / Buy via Webhook / Dispatch)

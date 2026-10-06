@@ -148,6 +148,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         queryString = qParts.join("&");
       } else if (action === "check") {
         requestPath = "/api/v2/spot/account/assets";
+      } else if (action === "bgb-convert-list") {
+        requestPath = "/api/v2/convert/bgb-convert-coin-list";
       }
 
       const timestamp = Date.now().toString();
@@ -209,6 +211,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         payload = {
           symbol: bodyJson.symbol,
           orderId: bodyJson.orderId,
+        };
+      } else if (action === "bgb-convert" || bodyJson.action === "bgb-convert") {
+        requestPath = "/api/v2/convert/bgb-convert";
+        payload = {
+          coinList: bodyJson.coinList || [],
         };
       }
 

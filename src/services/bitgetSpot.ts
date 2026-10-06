@@ -111,6 +111,8 @@ export function sanitizeHoldings(holdings: any[], priceMap?: Record<string, numb
     .map(h => sanitizeHolding(h, priceMap?.[h.symbol]));
 }
 
+export const DUST_VALUATION_THRESHOLD = 3.0; // Balances < 3.00 USD are treated as dust to avoid locking active quota
+
 export function filterActiveAndDustHoldings(holdings: SpotHolding[]): { active: SpotHolding[]; dust: SpotHolding[] } {
   if (!Array.isArray(holdings)) return { active: [], dust: [] };
   const active: SpotHolding[] = [];
@@ -119,7 +121,7 @@ export function filterActiveAndDustHoldings(holdings: SpotHolding[]): { active: 
     if (!raw) continue;
     const h = sanitizeHolding(raw);
     const valuation = (h.totalAmount || 0) * (h.currentPrice || h.avgCostPrice || 0);
-    if (valuation >= 1.0) {
+    if (valuation >= DUST_VALUATION_THRESHOLD) {
       active.push(h);
     } else {
       dust.push(h);
@@ -1621,5 +1623,67 @@ export async function executeRebalanceRotation(
     message: buyRes.success ? msg : `ปิดเหรียญ ${exitSymbol} แล้ว แต่ซื้อ ${entrySymbol} ไม่สำเร็จ: ${buyRes.message}`,
     updatedHoldings: buyRes.updatedHoldings,
   };
+}
+
+// ==========================================
+// BGB DUST CONVERT HELPERS
+// ==========================================
+export async function fetchBgbConvertibleCoins(config?: BitgetConfig): Promise<{ coin: string; available: string; bgbEstAmount: string }[]> {
+  const activeConfig = config || loadBitgetConfig();
+  const headers: Record<string, string> = {
+    'x-bitget-key': activeConfig.apiKey || '',
+    'x-bitget-secret': activeConfig.secretKey || '',
+    'x-bitget-passphrase': activeConfig.passphrase || '',
+  };
+
+  try {
+    const res = await fetch('/api/bitget?action=bgb-convert-list', { headers });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.code === '00000' && Array.isArray(data.data?.coinList)) {
+        return data.data.coinList;
+      }
+    }
+  } catch (err) {
+    console.warn('fetchBgbConvertibleCoins error:', err);
+  }
+  return [];
+}
+
+export async function executeBgbConvert(
+  coins: string[],
+  config?: BitgetConfig
+): Promise<{ success: boolean; message: string }> {
+  const activeConfig = config || loadBitgetConfig();
+  if (!activeConfig.apiKey || !activeConfig.secretKey) {
+    return { success: false, message: 'ไม่มี API Key ของ Bitget' };
+  }
+
+  try {
+    const res = await fetch('/api/bitget?action=bgb-convert', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-bitget-key': activeConfig.apiKey,
+        'x-bitget-secret': activeConfig.secretKey,
+        'x-bitget-passphrase': activeConfig.passphrase,
+      },
+      body: JSON.stringify({
+        action: 'bgb-convert',
+        coinList: coins,
+      }),
+    });
+
+    const data = await res.json();
+    if (data.code === '00000') {
+      return { success: true, message: `✓ แปลงเหรียญ ${coins.join(', ')} เป็น BGB สำเร็จเรียบร้อย!` };
+    } else if (data.code === '13011') {
+      return { success: false, message: `⏳ Bitget จำกัดการแปลงเศษเหรียญ 1 ครั้งทุกๆ 6 ชั่วโมง (โปรดรอรอบถัดไป)` };
+    } else {
+      return { success: false, message: `🚨 Bitget (${data.code}): ${data.msg || 'แปลง BGB ไม่สำเร็จ'}` };
+    }
+  } catch (err: any) {
+    return { success: false, message: `เกิดข้อผิดพลาดในการเชื่อมต่อ: ${err.message}` };
+  }
 }
 
