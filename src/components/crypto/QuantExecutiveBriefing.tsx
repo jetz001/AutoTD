@@ -1,9 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { Bot, Target, ShieldCheck, Activity } from "lucide-react"
+import { Bot, ShieldCheck, Activity } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Progress } from "@/components/ui/progress"
 import type { QuantExecutiveState } from "@/services/quantEngine"
 import type { BitgetConfig } from "@/services/bitgetSpot"
 
@@ -15,9 +14,6 @@ interface Props {
 }
 
 export function QuantExecutiveBriefing({ state, config }: Props) {
-  const goalPercent = config.takeProfitPercent || 3.5
-  const progressRatio = Math.min(100, Math.max(0, (state.currentRoundProgressPercent / goalPercent) * 100))
-
   return (
     <Card className="col-span-12 border-primary/20 bg-gradient-to-r from-card via-card to-primary/5 overflow-hidden">
       <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2">
@@ -53,30 +49,12 @@ export function QuantExecutiveBriefing({ state, config }: Props) {
       </CardHeader>
 
       <CardContent className="grid gap-3 pt-2 grid-cols-1 md:grid-cols-12">
-        {/* Goal Progress Metric */}
-        <div className="md:col-span-4 rounded-lg border bg-muted/20 p-2.5 sm:p-3 min-w-0">
-          <div className="flex items-center justify-between text-xs mb-1.5">
-            <span className="flex items-center gap-1 font-medium text-muted-foreground text-[11px] sm:text-xs">
-              <Target className="h-3.5 w-3.5 text-primary shrink-0" />
-              เป้าหมายกำไรรอบนี้
-            </span>
-            <span className="font-bold text-emerald-500 font-mono text-xs">
-              +{state.currentRoundProgressPercent.toFixed(2)}% / +{goalPercent.toFixed(1)}%
-            </span>
-          </div>
-          <Progress value={progressRatio} className="h-2" />
-          <div className="mt-1.5 flex justify-between text-[10px] text-muted-foreground">
-            <span>ความคืบหน้า {progressRatio.toFixed(0)}%</span>
-            <span>เกณฑ์ TP: ทุน +{goalPercent}%</span>
-          </div>
-        </div>
-
         {/* Portfolio Guardrails Metric */}
-        <div className="md:col-span-4 rounded-lg border bg-muted/20 p-2.5 sm:p-3 min-w-0">
+        <div className="md:col-span-6 rounded-lg border bg-muted/20 p-2.5 sm:p-3 min-w-0">
           <div className="flex items-center justify-between text-xs mb-1">
             <span className="flex items-center gap-1 font-medium text-muted-foreground text-[11px] sm:text-xs">
               <ShieldCheck className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-              กรอบการเงิน (Guardrails)
+              กรอบการเงิน & โควตาพอร์ต (Guardrails)
             </span>
             <span className="font-bold text-foreground font-mono text-xs">
               ถือ {state.activeCoinsCount} / {config.maxCoins} เหรียญ
@@ -99,7 +77,7 @@ export function QuantExecutiveBriefing({ state, config }: Props) {
         </div>
 
         {/* Latest Thought & Decision Log */}
-        <div className="md:col-span-4 rounded-lg border bg-muted/20 p-2.5 sm:p-3 flex flex-col justify-between min-w-0">
+        <div className="md:col-span-6 rounded-lg border bg-muted/20 p-2.5 sm:p-3 flex flex-col justify-between min-w-0">
           <div className="text-[11px] font-medium text-muted-foreground mb-1 flex items-center justify-between">
             <span>บันทึกการตัดสินใจล่าสุด</span>
             <span className="text-[9px] text-muted-foreground/80 font-mono">Live</span>

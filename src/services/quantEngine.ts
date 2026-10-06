@@ -3,12 +3,14 @@ import type { SpotTickerItem, SpotHolding, BitgetConfig } from './bitgetSpot';
 import { isUnderCooldown } from './bitgetSpot';
 
 export interface QuantDecision {
-  action: 'BUY_TRANCHE' | 'TAKE_PROFIT' | 'CUT_LOSS' | 'HOLD_SCANNING' | 'TIME_EXTEND' | 'TIME_CLOSE';
+  action: 'BUY_TRANCHE' | 'TAKE_PROFIT' | 'CUT_LOSS' | 'HOLD_SCANNING' | 'TIME_EXTEND' | 'TIME_CLOSE' | 'REVISE_TARGET';
   symbol: string;
   price: number;
   reason: string;
   confidence: number;
   timestamp: string;
+  newTp?: number;
+  newSl?: number;
 }
 
 export interface QuantExecutiveState {
@@ -328,6 +330,63 @@ export function runQuantPortfolioCheck(
           statusMessage = `⏱️🛑 หมดเวลาถือครอง ${h.symbol} สั่งขายปิดทันทีเพื่อคืนเงินสด`;
           break;
         }
+      }
+    }
+
+    // 1.5 Dynamic Revise TP / SL Evaluator (Individual Target per Coin)
+    const matchedCand = screenedCandidates?.find(c => c.symbol === h.symbol);
+    if (!decision && matchedCand && !h.manualLock) {
+      const pnlPct = h.pnlPercent || 0;
+      let shouldRevise = false;
+      let newTp = h.takeProfitPrice;
+      let newSl = h.trailingSlPrice || h.cutLossPrice;
+      let reviseReason = '';
+
+      // Breakeven check (+1.2%)
+      if (pnlPct >= 1.2 && (!h.breakevenLocked || newSl <= h.avgCostPrice)) {
+        const bePrice = parseFloat((h.avgCostPrice * 1.002).toFixed(6));
+        if (bePrice > newSl) {
+          newSl = bePrice;
+          shouldRevise = true;
+          reviseReason = `กำไรแตะ +${pnlPct.toFixed(1)}% ➡️ เลื่อน SL มาบังทุนที่ $${newSl}`;
+        }
+      }
+
+      // Momentum Expansion check
+      if ((matchedCand.aiScore || 0) >= 75 && pnlPct >= 1.8) {
+        const expandedTp = parseFloat((h.currentPrice * 1.035).toFixed(6));
+        if (expandedTp > newTp * 1.005) {
+          const oldTpVal = newTp;
+          newTp = expandedTp;
+          shouldRevise = true;
+          reviseReason = `โมเมนตัมกราฟแข็งแกร่ง (Score ${matchedCand.aiScore}/100) ➡️ ขยายเป้า TP จาก $${oldTpVal} เป็น $${newTp}`;
+        }
+      }
+      // Overbought Tighten check
+      else if ((matchedCand.rsi15m || 0) > 75 && pnlPct >= 2.0) {
+        const tightenTp = parseFloat((h.currentPrice * 1.003).toFixed(6));
+        if (tightenTp < newTp) {
+          const oldTpVal = newTp;
+          newTp = tightenTp;
+          shouldRevise = true;
+          reviseReason = `RSI แตะ ${matchedCand.rsi15m} (Overbought) ➡️ ร่นเป้า TP จาก $${oldTpVal} มาที่ $${newTp} ล็อกกำไรก่อนย่อ`;
+        }
+      }
+
+      if (shouldRevise) {
+        decision = {
+          action: 'REVISE_TARGET',
+          symbol: h.symbol,
+          price: h.currentPrice,
+          reason: reviseReason,
+          confidence: 85,
+          timestamp: new Date().toLocaleTimeString(),
+          newTp,
+          newSl,
+        };
+        status = 'HOLD_SCANNING';
+        statusMessage = `🎯🔄 [REVISE TP/SL] ${reviseReason}`;
+        break;
       }
     }
   }

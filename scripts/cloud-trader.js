@@ -661,35 +661,81 @@ async function runAutopilotCycle() {
           continue;
         }
       }
-      // 5.3 Breakeven Lock & Dynamic Trailing
-      else if (pnlPct >= 1.5 && match && !match.manualLock) {
-        if (!match.breakevenLocked) {
-          match.breakevenLocked = true;
-          match.trailingSlPrice = parseFloat((avgCost * 1.002).toFixed(4));
-          console.log(`[BREAKEVEN] ${h.symbol} locked at $${match.trailingSlPrice}`);
+      // 5.3 AI & Quant Dynamic Revise TP / SL (เป้าหมายเฉพาะตัวของแต่ละเหรียญ: ปรับเป้า หรือ คงเดิม)
+      else if (match && !match.manualLock) {
+        let revisedTp = match.takeProfitPrice || effectiveTp;
+        let revisedSl = match.trailingSlPrice || effectiveSl;
+        let isRevised = false;
+        let reviseReason = '';
+
+        try {
+          const recentCandles15 = await fetchBitgetCandles(h.symbol, '15min', '30');
+          if (recentCandles15.length >= 14) {
+            const a15 = indicators.analyzeTimeframeIndicators(recentCandles15);
+            const atr15 = a15?.atrVal || (h.currentPrice * 0.02);
+
+            // A) REVISE SL: Breakeven Protection (+1.2% profit)
+            if (pnlPct >= 1.2 && !match.breakevenLocked) {
+              const bePrice = parseFloat((avgCost * 1.002).toFixed(4));
+              if (bePrice > revisedSl) {
+                match.breakevenLocked = true;
+                revisedSl = bePrice;
+                isRevised = true;
+                reviseReason = `กำไรแตะ +${pnlPct.toFixed(2)}% (>= +1.2%) ➡️ เลื่อน SL มาบังทุนที่ $${revisedSl} ล็อกความเสี่ยง`;
+              }
+            }
+
+            // B) REVISE SL: Trailing SL up along with rising SuperTrend
+            if (a15 && a15.supertrendDir === 1 && a15.supertrendPrice > revisedSl && a15.supertrendPrice < h.currentPrice) {
+              const newSl = parseFloat(a15.supertrendPrice.toFixed(4));
+              if (newSl > revisedSl) {
+                revisedSl = newSl;
+                isRevised = true;
+                reviseReason = `SuperTrend 15m ขาขึ้นต่อเนื่อง ➡️ ขยับ Trailing SL ขึ้นล็อกกำไรที่ $${revisedSl}`;
+              }
+            }
+
+            // C) REVISE TP: Strong Momentum Expansion (ขยายเป้าทำกำไรตามโมเมนตัม)
+            if (a15 && a15.supertrendDir === 1 && a15.score >= 70 && pnlPct >= 1.8) {
+              const proposedTp = parseFloat((h.currentPrice + 2.0 * atr15).toFixed(4));
+              if (proposedTp > revisedTp * 1.005) {
+                const prevTp = revisedTp;
+                revisedTp = proposedTp;
+                isRevised = true;
+                reviseReason = `โมเมนตัม 15m แข็งแกร่ง (Score ${a15.score}/100) ➡️ ขยายเป้า TP จาก $${prevTp} เป็น $${revisedTp}`;
+              }
+            }
+            // D) REVISE TP: Overbought Exhaustion Guard (ร่นเป้าปิดกำไรก่อนย่อ)
+            else if (a15 && a15.rsi > 75 && pnlPct >= 2.0) {
+              const tightenTp = parseFloat((h.currentPrice * 1.003).toFixed(4));
+              if (tightenTp < revisedTp) {
+                const prevTp = revisedTp;
+                revisedTp = tightenTp;
+                isRevised = true;
+                reviseReason = `RSI 15m แตะ ${a15.rsi.toFixed(1)} (Overbought สูง) ➡️ ร่นเป้า TP จาก $${prevTp} มาที่ $${revisedTp} เพื่อล็อกกำไรก่อนย่อตัว`;
+              }
+            }
+          }
+        } catch (e) {
+          console.warn(`Revise TP/SL error for ${h.symbol}:`, e.message);
+        }
+
+        if (isRevised) {
+          match.takeProfitPrice = revisedTp;
+          match.trailingSlPrice = revisedSl;
+          console.log(`[REVISE TP/SL] ${h.symbol}: ปรับเป้า TP: $${revisedTp} | SL: $${revisedSl} (${reviseReason})`);
           newLogs.push({
             id: Date.now().toString(),
             timestamp: Date.now(),
             time: getThaiTimeString(),
-            action: '🔒 [DYNAMIC BREAKEVEN]',
+            action: '🎯🔄 [REVISE TP/SL]',
             symbol: h.symbol,
-            note: `กำไรวิ่งแตะ +${pnlPct.toFixed(2)}% (>= +1.5%) ➡️ เลื่อนจุดตัดขาดทุนมาบังทุนที่ $${match.trailingSlPrice} ล็อกความเสี่ยงห้ามขาดทุน`,
-            color: '#10b981'
+            note: `${reviseReason}`,
+            color: '#38bdf8'
           });
+        } else {
+          console.log(`[REVISE TP/SL] ${h.symbol}: คงเดิม (TP: $${revisedTp.toFixed(4)}, SL: $${revisedSl.toFixed(4)}) - กราฟยังเป็นไปตามแผน`);
         }
-
-        // Dynamic Trailing via 15m SuperTrend
-        try {
-          const recentCandles = await fetchBitgetCandles(h.symbol, '15min', '20');
-          if (recentCandles.length >= 15) {
-            const st = indicators.calculateSuperTrend(recentCandles, 10, 3.0);
-            const latestSt = st[st.length - 1];
-            if (latestSt.direction === 1 && latestSt.supertrend > (match.trailingSlPrice || 0) && latestSt.supertrend < h.currentPrice) {
-              match.trailingSlPrice = parseFloat(latestSt.supertrend.toFixed(4));
-              console.log(`Trailing SL for ${h.symbol} advanced to $${match.trailingSlPrice}`);
-            }
-          }
-        } catch (trailErr) {}
       }
 
       // 5.4 Adaptive Time-Stop & Dynamic Extension Evaluator

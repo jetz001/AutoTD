@@ -439,6 +439,24 @@ export function CryptoPageClient() {
               const logs = [newLog, ...loadQuantLogs(config.isPaperTrading)]
               saveQuantLogs(logs, config.isPaperTrading)
             }
+            // 5.2.3 AUTO REVISE TARGET: Dynamically update TP and SL per individual coin based on AI/Quant scan
+            else if (decision.action === "REVISE_TARGET") {
+              await handleUpdateHoldingParams(decision.symbol, {
+                takeProfitPrice: decision.newTp,
+                trailingSlPrice: decision.newSl,
+              })
+
+              const newLog = {
+                id: Date.now().toString(),
+                time: new Date().toLocaleTimeString(),
+                action: "🎯🔄 [REVISE TP/SL]",
+                symbol: decision.symbol,
+                note: `${decision.reason} | TP ใหม่: $${decision.newTp?.toFixed(4)} | SL ใหม่: $${decision.newSl?.toFixed(4)}`,
+                color: "#38bdf8",
+              }
+              const logs = [newLog, ...loadQuantLogs(config.isPaperTrading)]
+              saveQuantLogs(logs, config.isPaperTrading)
+            }
             // 5.3 AUTO-BUY: DCA TRANCHE or NEW TRANCHE 1 (Hybrid Quant + OpenRouter AI)
             else if (decision.action === "BUY_TRANCHE") {
               let availableCash = overallState.cashReserveUsdt
