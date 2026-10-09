@@ -15,7 +15,7 @@ interface Props {
   onOpenReports?: () => void
 }
 
-export function QuantExecutiveBriefing({ state, config }: Props) {
+export function QuantExecutiveBriefing({ state, config, onOpenReports, onTriggerScan, isScanning }: Props) {
   return (
     <Card className="col-span-12 border-primary/20 bg-gradient-to-r from-card via-card to-primary/5 overflow-hidden">
       <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2">
