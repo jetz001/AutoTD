@@ -8,7 +8,9 @@ interface Env {
   BITGET_API_KEY?: string;
   BITGET_SECRET_KEY?: string;
   BITGET_PASSPHRASE?: string;
+  TYPESAFE_API_KEY?: string;
   OPENROUTER_API_KEY?: string;
+  GROQ_API_KEY?: string;
 }
 
 const corsHeaders = {
@@ -26,6 +28,7 @@ const CORE_SETTINGS_KEYS = [
   "apiKey",
   "secretKey",
   "passphrase",
+  "typesafeApiKey",
   "openrouterApiKey",
   "groqApiKey",
   "isPaperTrading",
@@ -49,8 +52,9 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     apiKey: env.BITGET_API_KEY || "",
     secretKey: env.BITGET_SECRET_KEY || "",
     passphrase: env.BITGET_PASSPHRASE || "",
+    typesafeApiKey: env.TYPESAFE_API_KEY || "",
     openrouterApiKey: env.OPENROUTER_API_KEY || "",
-    groqApiKey: (env as any).GROQ_API_KEY || "",
+    groqApiKey: env.GROQ_API_KEY || "",
     isPaperTrading: false, // Live trading mode default
     autoPilotEnabled: true,
     tranchePercent: 20,

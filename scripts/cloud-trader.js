@@ -745,6 +745,56 @@ async function runAutopilotCycle() {
                 reviseReason = `RSI 15m แตะ ${a15.rsi.toFixed(1)} (Overbought สูง) ➡️ ร่นเป้า TP จาก $${prevTp} มาที่ $${revisedTp} เพื่อล็อกกำไรก่อนย่อตัว`;
               }
             }
+            // D) AI Jev Take-Profit Guard: Check if should SELL now to lock gains on high RSI
+            if (a15 && a15.rsi > 75 && pnlPct >= 1.5 && jevKey) {
+              try {
+                const jRes = await fetch('https://api.typesafe.ai/v1/systemone', {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${jevKey}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    state: `Holding ${h.symbol}: AvgCost $${avgCost}, Current $${h.currentPrice} (PnL: +${pnlPct.toFixed(2)}%). 15m RSI reached ${a15.rsi.toFixed(1)} (Overbought).`,
+                    model: 'jev-latest',
+                    questions: {
+                      take_profit_now: {
+                        type: 'choice',
+                        instructions: 'Should the trading bot SELL now to lock profit before a pullback, or HOLD?',
+                        criteria: {
+                          'SELL': 'Overbought exhaustion, take profit immediately to secure gains',
+                          'HOLD': 'Strong continuation momentum, continue holding'
+                        }
+                      }
+                    }
+                  }),
+                  signal: AbortSignal.timeout(6000)
+                });
+                if (jRes.ok) {
+                  const jData = await jRes.json();
+                  const choice = jData.answers?.take_profit_now?.choice;
+                  const prob = jData.answers?.take_profit_now?.probabilities?.[choice] ?? 0.8;
+                  if (choice === 'SELL' && prob >= 0.85) {
+                    console.log(`🎯 [AI JEV TAKE PROFIT] ${h.symbol} Jev chose SELL to lock +${pnlPct.toFixed(2)}% (Prob: ${(prob * 100).toFixed(0)}%)`);
+                    const sellSize = formatCoinAmount(h.amount, h.symbol);
+                    const sellRes = await placeBitgetOrder({ symbol: h.symbol, side: 'sell', orderType: 'market', size: sellSize }, config);
+                    if (sellRes.code === '00000') {
+                      newLogs.push({
+                        id: Date.now().toString(),
+                        timestamp: Date.now(),
+                        time: getThaiTimeString(),
+                        action: '🎯 [AI JEV TAKE PROFIT]',
+                        symbol: h.symbol,
+                        note: `Jev สั่งขายล็อกกำไรดักหน้าย่อ @ $${h.currentPrice} (+${pnlPct.toFixed(2)}%) [Prob: ${(prob * 100).toFixed(0)}%]`,
+                        color: '#10b981'
+                      });
+                      liveHoldingsConfig = liveHoldingsConfig.filter(lh => lh.symbol !== h.symbol);
+                      usdtAvailable += (h.amount * h.currentPrice);
+                      holdings.splice(i, 1);
+                      i--;
+                      continue;
+                    }
+                  }
+                }
+              } catch (e) {}
+            }
           }
         } catch (e) {
           console.warn(`Revise TP/SL error for ${h.symbol}:`, e.message);
@@ -806,6 +856,47 @@ async function runAutopilotCycle() {
               evalNote = `กราฟ ${newTf} ยังเป็นทรงบวก (Score ${Math.max(score15, score1h)}/100 | ${isBull1h ? '1h Bull' : '15m Bull'})`;
             } else {
               evalNote = `กราฟเสียทรงทั้ง 15m/1h (Score ${Math.max(score15, score1h)}/100) หลุดแนวโน้ม`;
+            }
+
+            // Consult TypeSafe Jev if available for definitive HOLD vs SELL verdict
+            if (jevKey) {
+              try {
+                const jState = `Position ${h.symbol}: AvgCost $${avgCost}, Current $${h.currentPrice} (PnL: ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%). Elapsed Time: ${Math.round(elapsedMin)}m/${match.maxHoldMinutes}m. 15m Score: ${score15}, 1h Score: ${score1h}. 15m Trend: ${isBull15 ? 'Bull' : 'Bear'}, 1h Trend: ${isBull1h ? 'Bull' : 'Bear'}.`;
+                const jRes = await fetch('https://api.typesafe.ai/v1/systemone', {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${jevKey}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    state: jState,
+                    model: 'jev-latest',
+                    questions: {
+                      verdict: {
+                        type: 'choice',
+                        instructions: 'Should the quantitative trading bot continue to HOLD this position or SELL to exit now?',
+                        criteria: {
+                          'HOLD': 'Trend is intact, healthy momentum, let profit run or normal minor consolidation',
+                          'SELL': 'Momentum exhausted, severe overbought reversal, or breakdown'
+                        }
+                      }
+                    }
+                  }),
+                  signal: AbortSignal.timeout(6000)
+                });
+                if (jRes.ok) {
+                  const jData = await jRes.json();
+                  const choice = jData.answers?.verdict?.choice;
+                  const prob = jData.answers?.verdict?.probabilities?.[choice] ?? 0.8;
+                  console.log(`[AI Sentinel Jev Position Check] ${h.symbol}: Verdict=${choice} (Prob: ${(prob * 100).toFixed(0)}%)`);
+                  if (choice === 'SELL' && prob >= 0.70) {
+                    shouldExtend = false;
+                    evalNote = `AI Jev วินิจฉัยสั่ง SELL (Prob ${(prob * 100).toFixed(0)}%) โมเมนตัมชะลอตัว`;
+                  } else if (choice === 'HOLD' && prob >= 0.65) {
+                    shouldExtend = true;
+                    evalNote = `AI Jev วินิจฉัยสั่ง HOLD (Prob ${(prob * 100).toFixed(0)}%) แนวโน้มยังแข็งแกร่งถือต่อ`;
+                  }
+                }
+              } catch (je) {
+                console.warn(`Jev position evaluator warning:`, je.message);
+              }
             }
           } catch (e) {
             console.warn(`Time evaluator error for ${h.symbol}:`, e.message);

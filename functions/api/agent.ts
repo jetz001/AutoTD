@@ -3,6 +3,7 @@
 // Tier 2: OpenRouter Free Models Auto-Fallback Loop (Secondary)
 
 interface Env {
+  TYPESAFE_API_KEY?: string;
   GROQ_API_KEY?: string;
   OPENROUTER_API_KEY?: string;
   AI_API_KEY?: string;
@@ -86,7 +87,7 @@ export async function getLiveFreeModels(apiKey?: string): Promise<string[]> {
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, x-groq-key, x-openrouter-key, Authorization",
+  "Access-Control-Allow-Headers": "Content-Type, x-typesafe-key, x-groq-key, x-openrouter-key, Authorization",
 };
 
 export const onRequest: PagesFunction<Env> = async (context) => {
@@ -95,6 +96,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   if (request.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
+
+  const typesafeKey =
+    request.headers.get("x-typesafe-key") ||
+    (env as any).TYPESAFE_API_KEY ||
+    (env as any).TYPESAFE_KEY;
 
   const groqKey =
     request.headers.get("x-groq-key") ||
@@ -116,7 +122,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     return Response.json(
       {
         status: "READY",
-        primaryProvider: "groq",
+        primaryProvider: typesafeKey ? "typesafe" : "groq",
+        hasTypesafeKey: Boolean(typesafeKey),
         hasGroqKey: Boolean(groqKey),
         hasOpenRouterKey: Boolean(openrouterKey),
         groqModels: GROQ_MODELS,
@@ -140,14 +147,15 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     );
   }
 
+  const effectiveTypesafeKey = body.typesafeApiKey || typesafeKey;
   const effectiveGroqKey = body.groqApiKey || groqKey;
   const effectiveOpenrouterKey = body.openrouterApiKey || body.apiKey || openrouterKey;
 
-  if (!effectiveGroqKey && !effectiveOpenrouterKey) {
+  if (!effectiveTypesafeKey && !effectiveGroqKey && !effectiveOpenrouterKey) {
     return Response.json(
       {
         code: "40001",
-        msg: "Missing AI Key: configure GROQ_API_KEY or OPENROUTER_API_KEY",
+        msg: "Missing AI Key: configure TYPESAFE_API_KEY, GROQ_API_KEY or OPENROUTER_API_KEY",
       },
       { status: 400, headers: corsHeaders }
     );
@@ -218,7 +226,98 @@ Respond ONLY with valid JSON in this exact structure:
   let lastError: any = null;
 
   // ==========================================
-  // TIER 1: GROQ HIGH-SPEED ULTRA-LOW-LATENCY INFERENCE (PRIMARY)
+  // TIER 1: TYPESAFE JEV SYSTEM ONE MODEL (PRIMARY FAST GATER & CALIBRATED PROBABILITIES)
+  // ==========================================
+  if (effectiveTypesafeKey) {
+    try {
+      const isPositionCheck = Boolean(body.isPosition || body.mode === "position");
+      const promptState = isPositionCheck
+        ? `Holding ${symbol}: AvgCost $${body.avgCost || currentPrice}, Current $${currentPrice} (PnL: ${body.pnlPct || 0}%). 15m RSI: ${rsi15m}. SuperTrend: ${body.supertrend || 'Bullish'}.`
+        : `Quant Score: ${aiScore}/100 for ${symbol} @ $${currentPrice}. 15m RSI: ${rsi15m}, 24h Change: ${change24h}%.`;
+
+      const questions = isPositionCheck
+        ? {
+            position_verdict: {
+              type: "choice",
+              instructions: "Should the quantitative trading bot continue to HOLD this position or SELL to exit?",
+              criteria: {
+                "HOLD": "Healthy uptrend, trend intact, let profit run or normal minor consolidation",
+                "SELL": "Momentum exhausted, severe overbought reversal, or breakdown"
+              }
+            }
+          }
+        : {
+            trade_decision: {
+              type: "choice",
+              instructions: "Should the quantitative trading bot execute a BUY_SPOT order for this candidate dip or HOLD/WAIT?",
+              criteria: {
+                "BUY_SPOT": "Valid dip entry in uptrend, strong confluence, high win probability",
+                "HOLD": "High risk, overbought, uncertain momentum, or unsafe chart structure"
+              }
+            },
+            risk_acceptable: {
+              type: "noul",
+              instructions: "Is the downside risk acceptable for spot accumulation?"
+            }
+          };
+
+      const jRes = await fetch("https://api.typesafe.ai/v1/systemone", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${effectiveTypesafeKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          state: promptState,
+          model: "jev-latest",
+          questions,
+        }),
+        signal: AbortSignal.timeout(6000),
+      });
+
+      if (jRes.ok) {
+        const jData = (await jRes.json()) as any;
+        const answers = jData.answers || {};
+        const choice = isPositionCheck
+          ? answers.position_verdict?.choice || "HOLD"
+          : answers.trade_decision?.choice || "HOLD";
+        const prob = isPositionCheck
+          ? answers.position_verdict?.probabilities?.[choice] ?? answers.position_verdict?.confidence ?? 0.8
+          : answers.trade_decision?.probabilities?.[choice] ?? answers.trade_decision?.confidence ?? 0.8;
+        const riskNoul = answers.risk_acceptable?.noul ?? 0.5;
+
+        const action = isPositionCheck ? choice : (choice === "BUY_SPOT" ? "BUY_SPOT" : "HOLD");
+        const reason = isPositionCheck
+          ? `[TypeSafe Jev] Decision: ${choice} (Confidence: ${(prob * 100).toFixed(0)}%)`
+          : `[TypeSafe Jev] Decision: ${choice} (Prob: ${(prob * 100).toFixed(0)}%, Risk Pass: ${(riskNoul * 100).toFixed(0)}%)`;
+
+        return Response.json(
+          {
+            code: "00000",
+            msg: "success",
+            provider: "typesafe",
+            data: {
+              action,
+              confidence: Math.round(prob * 100),
+              reason,
+              modelUsed: `typesafe/${jData.model || "jev-1.13"}`,
+              symbol,
+              price: currentPrice,
+              probabilities: isPositionCheck ? answers.position_verdict?.probabilities : answers.trade_decision?.probabilities,
+              riskScore: riskNoul,
+            },
+          },
+          { headers: corsHeaders }
+        );
+      }
+    } catch (e: any) {
+      console.warn("[AutoTD Agent] TypeSafe Jev fallback triggered:", e.message);
+      lastError = e;
+    }
+  }
+
+  // ==========================================
+  // TIER 2: GROQ HIGH-SPEED ULTRA-LOW-LATENCY INFERENCE (SECONDARY FALLBACK)
   // ==========================================
   if (effectiveGroqKey) {
     for (const model of GROQ_MODELS) {
