@@ -90,6 +90,8 @@ export function CryptoPageClient() {
           apiKey: synced.apiKey || config.apiKey,
           secretKey: synced.secretKey || config.secretKey,
           passphrase: synced.passphrase || config.passphrase,
+          typesafeApiKey: synced.typesafeApiKey || config.typesafeApiKey,
+          groqApiKey: synced.groqApiKey || config.groqApiKey,
           openrouterApiKey: synced.openrouterApiKey || config.openrouterApiKey,
           isPaperTrading: targetMode,
           autoPilotEnabled: typeof synced.autoPilotEnabled === "boolean" ? synced.autoPilotEnabled : config.autoPilotEnabled,

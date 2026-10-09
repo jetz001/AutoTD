@@ -214,15 +214,40 @@ export function BitgetSettingsModal({ isOpen, onClose, onSave }: Props) {
             </div>
           </div>
 
-          {/* Groq AI Agent (Primary) */}
+          {/* TypeSafe Jev System One AI (Tier 1) */}
+          <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 font-semibold text-foreground text-xs">
+                <Sliders className="h-3.5 w-3.5 text-cyan-400" />
+                <span>TypeSafe Jev (System One Decision Model - ตัวกรองด่านแรก)</span>
+              </div>
+              <span className="rounded bg-cyan-500/10 border border-cyan-500/30 px-1.5 py-0.5 text-[9px] font-bold text-cyan-400">
+                ⚡ TIER 1 (PRIMARY)
+              </span>
+            </div>
+            <div>
+              <label className="text-[11px] text-muted-foreground">
+                TypeSafe API Key (System One Model: Calibrated Probabilities & Choice Decision)
+              </label>
+              <Input
+                type="password"
+                placeholder="ts_live_... (หรือใช้คีย์อัตโนมัติจากเซิร์ฟเวอร์)"
+                value={cfg.typesafeApiKey || ""}
+                onChange={(e) => setCfg({ ...cfg, typesafeApiKey: e.target.value.trim() })}
+                className="mt-1 h-8 text-xs font-mono"
+              />
+            </div>
+          </div>
+
+          {/* Groq AI Agent (Tier 2 Fallback) */}
           <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 font-semibold text-foreground text-xs">
                 <Sliders className="h-3.5 w-3.5 text-amber-400" />
-                <span>Groq LPU AI (ระบบประมวลผลความเร็วสูง - ตัวหลัก)</span>
+                <span>Groq LPU AI (ระบบประมวลผลความเร็วสูง - สำรองด่านที่ 2)</span>
               </div>
               <span className="rounded bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.5 text-[9px] font-bold text-amber-400">
-                ⚡ PRIMARY
+                ⚡ TIER 2 (FALLBACK)
               </span>
             </div>
             <div>

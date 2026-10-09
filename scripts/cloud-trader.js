@@ -2,8 +2,38 @@
 // Runs on GitHub Actions (Microsoft Azure / AWS runners) 24/7
 // Zero local PC dependency, zero Cloudflare WAF block
 
+const fs = require('fs');
+const path = require('path');
 const crypto = require('crypto');
 const indicators = require('./indicators.js');
+
+// Auto-load .env or fallback keys from local skill .env
+function loadLocalEnv() {
+  const candidates = [
+    path.join(__dirname, '..', '.env.local'),
+    path.join(__dirname, '..', '.env'),
+    path.join(process.env.USERPROFILE || '', '.gemini', 'config', 'skills', 'jev', '.env'),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      try {
+        const text = fs.readFileSync(p, 'utf8');
+        for (const line of text.split('\n')) {
+          const trimmed = line.trim();
+          if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
+            const [k, ...v] = trimmed.split('=');
+            const key = k.trim();
+            const val = v.join('=').trim().replace(/^["']|["']$/g, '');
+            if (!process.env[key]) {
+              process.env[key] = val;
+            }
+          }
+        }
+      } catch {}
+    }
+  }
+}
+loadLocalEnv();
 
 const BITGET_HOST = 'https://api.bitget.com';
 const CLOUD_CONFIG_URL = 'https://autotd.pages.dev/api/config';
@@ -1035,20 +1065,87 @@ async function runAutopilotCycle() {
 
       console.log(`Top Candidate: ${best.symbol} (Score ${best.totalScore}/100 Grade ${best.grade}) @ $${best.price} | Trigger: ${best.primaryIndicator} (${best.bestTf}) | TP: $${tpTargetPrice}, SL: $${slTargetPrice}, TimeStop: ${maxHoldMinutes}m`);
 
-      // Consult AI Sentinel
+      // Consult Multi-Tier AI Sentinel:
+      // Tier 1: TypeSafe Jev (System One Fast Decision Engine & Calibrated Probability)
+      // Tier 2: Groq (LPU Ultra-fast Generative LLM - Qwen/Llama)
+      // Tier 3: OpenRouter (Free Tier Generative LLM Fallback)
+      // Tier 4: Pure Quant Multi-Timeframe Confluence Heuristic
       let aiDecision = { action: 'BUY_SPOT', confidence: 85, reason: `Multi-Timeframe Confluence Grade ${best.grade}` };
+      const jevKey = config.typesafeApiKey || process.env.TYPESAFE_API_KEY;
       const groqKey = config.groqApiKey || process.env.GROQ_API_KEY;
       const orKey = config.openrouterApiKey || process.env.OPENROUTER_API_KEY;
-
-      const prompt = `Quant Score: ${best.totalScore}/100 (${best.grade}) for ${best.symbol} @ $${best.price}.
-Trigger: ${best.primaryIndicator} (${best.bestTf}). Proposed TP: $${tpTargetPrice}, SL: $${slTargetPrice}, Hold: ${maxHoldMinutes}m.
-Respond ONLY in JSON: {"action":"BUY_SPOT"|"HOLD","confidence":number,"reason":"short explanation"}`;
 
       let aiApproved = true;
       let aiModelUsed = 'quant_multi_tf';
 
-      if (groqKey) {
+      // ==========================================
+      // TIER 1: TypeSafe Jev (System One Model)
+      // ==========================================
+      if (jevKey) {
         try {
+          console.log(`[AI Sentinel Tier 1] Evaluating ${best.symbol} with TypeSafe Jev...`);
+          const jevState = `Quant Score: ${best.totalScore}/100 (${best.grade}) for ${best.symbol} @ $${best.price}. Indicator: ${best.primaryIndicator} (${best.bestTf}). Proposed TP: $${tpTargetPrice}, SL: $${slTargetPrice}, Hold: ${maxHoldMinutes}m. RSI: ${best.rsi15m || 'N/A'}. 24h Change: ${best.change24h || 0}%.`;
+          const jRes = await fetch('https://api.typesafe.ai/v1/systemone', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${jevKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              state: jevState,
+              model: 'jev-latest',
+              questions: {
+                trade_decision: {
+                  type: 'choice',
+                  instructions: 'Should the quantitative trading bot execute a BUY_SPOT order for this candidate dip or HOLD/WAIT?',
+                  criteria: {
+                    'BUY_SPOT': 'Valid dip entry in uptrend, strong confluence score, favorable risk-reward ratio',
+                    'HOLD': 'High risk, overbought, uncertain momentum, or unsafe chart structure'
+                  }
+                },
+                risk_acceptable: {
+                  type: 'noul',
+                  instructions: 'Is the downside risk acceptable for spot accumulation?'
+                }
+              }
+            }),
+            signal: AbortSignal.timeout(6000)
+          });
+
+          if (jRes.ok) {
+            const jData = await jRes.json();
+            const choice = jData.answers?.trade_decision?.choice;
+            const prob = jData.answers?.trade_decision?.probabilities?.BUY_SPOT ?? jData.answers?.trade_decision?.confidence ?? 0.8;
+            const riskProb = jData.answers?.risk_acceptable?.noul ?? 0.5;
+
+            aiModelUsed = `typesafe/${jData.model || 'jev-1.13'}`;
+            aiDecision = {
+              action: choice === 'BUY_SPOT' ? 'BUY_SPOT' : 'HOLD',
+              confidence: Math.round(prob * 100),
+              reason: `Jev Verdict: ${choice} (Prob: ${(prob * 100).toFixed(0)}%, Risk Pass: ${(riskProb * 100).toFixed(0)}%)`
+            };
+            if (choice === 'HOLD' || prob < 0.60) {
+              aiApproved = false;
+            }
+            console.log(`[AI Sentinel Tier 1: Jev] Verdict: ${choice} | Prob: ${(prob * 100).toFixed(1)}% | Approved: ${aiApproved}`);
+          } else {
+            console.warn(`[AI Sentinel Tier 1] Jev returned HTTP ${jRes.status}, falling back to Tier 2 (Groq)...`);
+          }
+        } catch (e) {
+          console.warn(`[AI Sentinel Tier 1] Jev call failed: ${e.message}, falling back to Tier 2 (Groq)...`);
+        }
+      }
+
+      // ==========================================
+      // TIER 2: Groq LPU (Generative Fallback)
+      // ==========================================
+      if (aiModelUsed === 'quant_multi_tf' && groqKey) {
+        try {
+          console.log(`[AI Sentinel Tier 2] Evaluating ${best.symbol} with Groq...`);
+          const prompt = `Quant Score: ${best.totalScore}/100 (${best.grade}) for ${best.symbol} @ $${best.price}.
+Trigger: ${best.primaryIndicator} (${best.bestTf}). Proposed TP: $${tpTargetPrice}, SL: $${slTargetPrice}, Hold: ${maxHoldMinutes}m.
+Respond ONLY in JSON: {"action":"BUY_SPOT"|"HOLD","confidence":number,"reason":"short explanation"}`;
+
           const gRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
@@ -1057,7 +1154,8 @@ Respond ONLY in JSON: {"action":"BUY_SPOT"|"HOLD","confidence":number,"reason":"
               max_tokens: 300,
               messages: [{ role: 'user', content: prompt }],
               response_format: { type: 'json_object' }
-            })
+            }),
+            signal: AbortSignal.timeout(6000)
           });
           if (gRes.ok) {
             const gData = await gRes.json();
@@ -1067,15 +1165,24 @@ Respond ONLY in JSON: {"action":"BUY_SPOT"|"HOLD","confidence":number,"reason":"
               aiDecision = parsed;
               aiModelUsed = 'groq/qwen3.8-27b';
               if (parsed.action === 'HOLD') aiApproved = false;
+              console.log(`[AI Sentinel Tier 2: Groq] Verdict: ${parsed.action} | Reason: ${parsed.reason}`);
             }
           }
         } catch (e) {
-          console.warn('Groq AI sentinel warning:', e.message);
+          console.warn('[AI Sentinel Tier 2] Groq failed, falling back to Tier 3 (OpenRouter):', e.message);
         }
       }
 
+      // ==========================================
+      // TIER 3: OpenRouter Free Models (Fallback)
+      // ==========================================
       if (aiModelUsed === 'quant_multi_tf' && orKey) {
         try {
+          console.log(`[AI Sentinel Tier 3] Evaluating ${best.symbol} with OpenRouter...`);
+          const prompt = `Quant Score: ${best.totalScore}/100 (${best.grade}) for ${best.symbol} @ $${best.price}.
+Trigger: ${best.primaryIndicator} (${best.bestTf}). Proposed TP: $${tpTargetPrice}, SL: $${slTargetPrice}, Hold: ${maxHoldMinutes}m.
+Respond ONLY in JSON: {"action":"BUY_SPOT"|"HOLD","confidence":number,"reason":"short explanation"}`;
+
           const oRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${orKey}`, 'Content-Type': 'application/json' },
@@ -1083,7 +1190,8 @@ Respond ONLY in JSON: {"action":"BUY_SPOT"|"HOLD","confidence":number,"reason":"
               model: 'qwen/qwen3.8-27b:free',
               messages: [{ role: 'user', content: prompt }],
               response_format: { type: 'json_object' }
-            })
+            }),
+            signal: AbortSignal.timeout(6000)
           });
           if (oRes.ok) {
             const oData = await oRes.json();
@@ -1093,12 +1201,15 @@ Respond ONLY in JSON: {"action":"BUY_SPOT"|"HOLD","confidence":number,"reason":"
               aiDecision = parsed;
               aiModelUsed = 'openrouter/qwen3.8-27b:free';
               if (parsed.action === 'HOLD') aiApproved = false;
+              console.log(`[AI Sentinel Tier 3: OpenRouter] Verdict: ${parsed.action} | Reason: ${parsed.reason}`);
             }
           }
         } catch (e) {
-          console.warn('OpenRouter sentinel warning:', e.message);
+          console.warn('[AI Sentinel Tier 3] OpenRouter failed, using Tier 4 Heuristic:', e.message);
         }
       }
+
+      console.log(`[AI Sentinel Final] Model: ${aiModelUsed} | Action: ${aiDecision.action} | Approved: ${aiApproved}`);
 
       const maxAvailable = Math.max(0, Math.floor((usdtAvailable - 0.05) * 100) / 100);
       const buySize = Math.min(10, maxAvailable);

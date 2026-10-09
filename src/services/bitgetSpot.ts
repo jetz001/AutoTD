@@ -8,6 +8,7 @@ export interface BitgetConfig {
   apiKey: string;
   secretKey: string;
   passphrase: string;
+  typesafeApiKey?: string;
   openrouterApiKey?: string;
   groqApiKey?: string;
   isPaperTrading: boolean;
@@ -155,6 +156,7 @@ export function loadBitgetConfig(): BitgetConfig {
     apiKey: '',
     secretKey: '',
     passphrase: '',
+    typesafeApiKey: '',
     openrouterApiKey: '',
     groqApiKey: '',
     isPaperTrading: true, // Default to PAPER TRADING for safety across all devices
