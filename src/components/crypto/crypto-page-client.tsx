@@ -4,6 +4,7 @@ import * as React from "react"
 import { Settings, Shield, Zap, RefreshCw, AlertCircle, Search, Layers, ShieldAlert } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { BitgetSettingsModal } from "./BitgetSettingsModal"
+import { DailyReportModal } from "./DailyReportModal"
 import { QuantExecutiveBriefing } from "./QuantExecutiveBriefing"
 import { SpotScreenerCard } from "./SpotScreenerCard"
 import { SpotHoldingsAvgCostCard } from "./SpotHoldingsAvgCostCard"
@@ -51,6 +52,7 @@ export type CryptoPrices = Record<string, number>
 export function CryptoPageClient() {
   const [config, setConfig] = React.useState<BitgetConfig>(loadBitgetConfig)
   const [isSettingsOpen, setIsSettingsOpen] = React.useState(false)
+  const [isReportsOpen, setIsReportsOpen] = React.useState(false)
   const [selectedSymbol, setSelectedSymbol] = React.useState("BTCUSDT")
   const [tickers, setTickers] = React.useState<SpotTickerItem[]>([])
   const [holdings, setHoldings] = React.useState<SpotHolding[]>(() => {
@@ -1018,6 +1020,7 @@ export function CryptoPageClient() {
       <QuantExecutiveBriefing
         state={quantState}
         config={config}
+        onOpenReports={() => setIsReportsOpen(true)}
       />
 
       {/* 2. Middle Grid: Multi-Timeframe Quant Screener (Left) & Holdings Tracker (Right) */}
@@ -1054,6 +1057,12 @@ export function CryptoPageClient() {
       <OrderHistoryCard
         config={config}
         quantLogs={quantState.recentLogs}
+      />
+
+      {/* Daily Report Modal */}
+      <DailyReportModal
+        isOpen={isReportsOpen}
+        onClose={() => setIsReportsOpen(false)}
       />
 
       {/* Settings Modal */}

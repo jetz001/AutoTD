@@ -588,6 +588,11 @@ async function runAutopilotCycle() {
   // ==========================================
   // 5. TAKE PROFIT & CUT LOSS EVALUATION (AUTONOMOUS)
   // ==========================================
+  // Bitget Spot Fee Schedule (Taker: 0.10% buy + 0.10% sell = 0.20% round-trip)
+  const BITGET_SPOT_FEE_RATE = 0.001; // 0.10% per trade (taker)
+  const BITGET_ROUNDTRIP_FEE_PCT = 0.20; // 0.20% round-trip
+  const BITGET_BREAKEVEN_BUFFER_PCT = 0.35; // 0.35% minimum profit to cover round-trip fee + slippage
+
   const tpTarget = config.takeProfitPercent || 3.5;
   const slTarget = config.cutLossPercent || 5.0;
   const jevKey = config.typesafeApiKey || process.env.TYPESAFE_API_KEY;
@@ -630,13 +635,21 @@ async function runAutopilotCycle() {
 
     if (avgCost > 0) {
       const pnlPct = ((h.currentPrice - avgCost) / avgCost) * 100;
+      const netPnlPct = pnlPct - BITGET_ROUNDTRIP_FEE_PCT;
+      const investedUsdt = match?.totalInvestedUsdt || (avgCost * h.amount);
+      const currentValUsdt = h.currentPrice * h.amount;
+      const estRoundtripFeeUsdt = (investedUsdt * BITGET_SPOT_FEE_RATE) + (currentValUsdt * BITGET_SPOT_FEE_RATE);
+      const netPnlUsdt = (currentValUsdt - investedUsdt) - estRoundtripFeeUsdt;
+
       h.pnlPct = pnlPct;
+      h.netPnlPct = netPnlPct;
       h.avgCost = avgCost;
+      h.estFeeUsdt = estRoundtripFeeUsdt;
 
       const effectiveTp = match?.takeProfitPrice || (avgCost * (1 + tpTarget / 100));
       const effectiveSl = match?.trailingSlPrice || match?.cutLossPrice || (avgCost * (1 - slTarget / 100));
 
-      console.log(`Holding ${h.symbol}: Price $${h.currentPrice}, AvgCost $${avgCost}, PnL: ${pnlPct.toFixed(2)}% | TP: $${effectiveTp.toFixed(4)}, SL: $${effectiveSl.toFixed(4)}`);
+      console.log(`Holding ${h.symbol}: Price $${h.currentPrice}, AvgCost $${avgCost}, Gross PnL: ${pnlPct.toFixed(2)}% | Net (หักฟี Bitget 0.2%): ${netPnlPct.toFixed(2)}% ($${netPnlUsdt.toFixed(2)}) | TP: $${effectiveTp.toFixed(4)}, SL: $${effectiveSl.toFixed(4)}`);
 
       // 5.1 Take Profit (Hard Exit)
       if (h.currentPrice >= effectiveTp) {
@@ -656,7 +669,7 @@ async function runAutopilotCycle() {
             time: getThaiTimeString(),
             action: '🎯 [CLOUD AUTO-TAKE PROFIT]',
             symbol: h.symbol,
-            note: `ล็อคกำไรสำเร็จ @ $${h.currentPrice} (+${pnlPct.toFixed(2)}%) คืน USDT กลับกระเป๋า Spot`,
+            note: `ล็อคกำไรสำเร็จ @ $${h.currentPrice} (+${pnlPct.toFixed(2)}% | Net สุทธิหลังหักฟี 0.2%: +${netPnlPct.toFixed(2)}%) คืน USDT กลับกระเป๋า Spot`,
             color: '#10b981'
           });
           liveHoldingsConfig = liveHoldingsConfig.filter(lh => lh.symbol !== h.symbol);
@@ -707,14 +720,14 @@ async function runAutopilotCycle() {
             const a15 = indicators.analyzeTimeframeIndicators(recentCandles15);
             const atr15 = a15?.atrVal || (h.currentPrice * 0.02);
 
-            // A) REVISE SL: Breakeven Protection (+1.2% profit)
+            // A) REVISE SL: Breakeven Protection (+1.2% profit) -> Cover 0.20% Bitget roundtrip fees + buffer
             if (pnlPct >= 1.2 && !match.breakevenLocked) {
-              const bePrice = parseFloat((avgCost * 1.002).toFixed(4));
+              const bePrice = parseFloat((avgCost * (1 + BITGET_BREAKEVEN_BUFFER_PCT / 100)).toFixed(4));
               if (bePrice > revisedSl) {
                 match.breakevenLocked = true;
                 revisedSl = bePrice;
                 isRevised = true;
-                reviseReason = `กำไรแตะ +${pnlPct.toFixed(2)}% (>= +1.2%) ➡️ เลื่อน SL มาบังทุนที่ $${revisedSl} ล็อกความเสี่ยง`;
+                reviseReason = `กำไรแตะ +${pnlPct.toFixed(2)}% (>= +1.2%) ➡️ เลื่อน SL มาบังทุนที่ $${revisedSl} (คุ้มครองค่าฟี Bitget 0.2% + กำไรส่วนเกิน)`;
               }
             }
 
@@ -748,21 +761,21 @@ async function runAutopilotCycle() {
                 reviseReason = `RSI 15m แตะ ${a15.rsi.toFixed(1)} (Overbought สูง) ➡️ ร่นเป้า TP จาก $${prevTp} มาที่ $${revisedTp} เพื่อล็อกกำไรก่อนย่อตัว`;
               }
             }
-            // D) AI Jev Take-Profit Guard: Check if should SELL now to lock gains on high RSI
-            if (a15 && a15.rsi > 75 && pnlPct >= 1.5 && jevKey) {
+            // D) AI Jev Take-Profit Guard: Check if should SELL now to lock gains on high RSI (Requires Net PnL >= +0.8% to cover 0.2% Bitget fee)
+            if (a15 && a15.rsi > 75 && netPnlPct >= 0.8 && jevKey) {
               try {
                 const jRes = await fetch('https://api.typesafe.ai/v1/systemone', {
                   method: 'POST',
                   headers: { 'Authorization': `Bearer ${jevKey}`, 'Content-Type': 'application/json' },
                   body: JSON.stringify({
-                    state: `Holding ${h.symbol}: AvgCost $${avgCost}, Current $${h.currentPrice} (PnL: +${pnlPct.toFixed(2)}%). 15m RSI reached ${a15.rsi.toFixed(1)} (Overbought).`,
+                    state: `Holding ${h.symbol}: AvgCost $${avgCost}, Current $${h.currentPrice} (Gross: +${pnlPct.toFixed(2)}%, Net after 0.2% fee: +${netPnlPct.toFixed(2)}%). 15m RSI reached ${a15.rsi.toFixed(1)} (Overbought).`,
                     model: 'jev-latest',
                     questions: {
                       take_profit_now: {
                         type: 'choice',
                         instructions: 'Should the trading bot SELL now to lock profit before a pullback, or HOLD?',
                         criteria: {
-                          'SELL': 'Overbought exhaustion, take profit immediately to secure gains',
+                          'SELL': 'Overbought exhaustion, take profit immediately to secure gains after fees',
                           'HOLD': 'Strong continuation momentum, continue holding'
                         }
                       }
@@ -775,7 +788,7 @@ async function runAutopilotCycle() {
                   const choice = jData.answers?.take_profit_now?.choice;
                   const prob = jData.answers?.take_profit_now?.probabilities?.[choice] ?? 0.8;
                   if (choice === 'SELL' && prob >= 0.85) {
-                    console.log(`🎯 [AI JEV TAKE PROFIT] ${h.symbol} Jev chose SELL to lock +${pnlPct.toFixed(2)}% (Prob: ${(prob * 100).toFixed(0)}%)`);
+                    console.log(`🎯 [AI JEV TAKE PROFIT] ${h.symbol} Jev chose SELL to lock Gross +${pnlPct.toFixed(2)}% | Net +${netPnlPct.toFixed(2)}% (Prob: ${(prob * 100).toFixed(0)}%)`);
                     const sellSize = formatCoinAmount(h.amount, h.symbol);
                     const sellRes = await placeBitgetOrder({ symbol: h.symbol, side: 'sell', orderType: 'market', size: sellSize }, config);
                     if (sellRes.code === '00000') {
@@ -785,7 +798,7 @@ async function runAutopilotCycle() {
                         time: getThaiTimeString(),
                         action: '🎯 [AI JEV TAKE PROFIT]',
                         symbol: h.symbol,
-                        note: `Jev สั่งขายล็อกกำไรดักหน้าย่อ @ $${h.currentPrice} (+${pnlPct.toFixed(2)}%) [Prob: ${(prob * 100).toFixed(0)}%]`,
+                        note: `Jev สั่งขายล็อกกำไรดักหน้าย่อ @ $${h.currentPrice} (+${pnlPct.toFixed(2)}% | Net หลังหักฟี 0.2%: +${netPnlPct.toFixed(2)}%) [Prob: ${(prob * 100).toFixed(0)}%]`,
                         color: '#10b981'
                       });
                       liveHoldingsConfig = liveHoldingsConfig.filter(lh => lh.symbol !== h.symbol);
@@ -1388,6 +1401,8 @@ Respond ONLY in JSON: {"action":"BUY_SPOT"|"HOLD","confidence":number,"reason":"
       const invested = lh.totalInvestedUsdt || (avgCost * amount);
       const unPnl = (curPrice - avgCost) * amount;
       const pnlPct = avgCost > 0 ? ((curPrice - avgCost) / avgCost) * 100 : 0;
+      const netPnlPct = pnlPct - BITGET_ROUNDTRIP_FEE_PCT;
+      const estFee = (invested * BITGET_SPOT_FEE_RATE) + ((curPrice * amount) * BITGET_SPOT_FEE_RATE);
       return {
         ...lh,
         currentPrice: parseFloat(curPrice.toFixed(6)),
@@ -1396,6 +1411,8 @@ Respond ONLY in JSON: {"action":"BUY_SPOT"|"HOLD","confidence":number,"reason":"
         totalInvestedUsdt: parseFloat(invested.toFixed(2)),
         unrealizedPnlUsdt: parseFloat(unPnl.toFixed(2)),
         pnlPercent: parseFloat(pnlPct.toFixed(2)),
+        netPnlPercent: parseFloat(netPnlPct.toFixed(2)),
+        estFeeUsdt: parseFloat(estFee.toFixed(4)),
         takeProfitPrice: lh.takeProfitPrice || parseFloat((avgCost * (1 + tpTarget / 100)).toFixed(6)),
         cutLossPrice: lh.cutLossPrice || parseFloat((avgCost * (1 - slTarget / 100)).toFixed(6)),
       };

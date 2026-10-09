@@ -1,8 +1,9 @@
 "use client"
 
 import * as React from "react"
-import { Bot, ShieldCheck, Activity } from "lucide-react"
+import { Bot, ShieldCheck, Activity, FileText } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
 import type { QuantExecutiveState } from "@/services/quantEngine"
 import type { BitgetConfig } from "@/services/bitgetSpot"
 
@@ -11,6 +12,7 @@ interface Props {
   config: BitgetConfig
   onTriggerScan?: () => void
   isScanning?: boolean
+  onOpenReports?: () => void
 }
 
 export function QuantExecutiveBriefing({ state, config }: Props) {
@@ -46,6 +48,18 @@ export function QuantExecutiveBriefing({ state, config }: Props) {
             </p>
           </div>
         </div>
+
+        {onOpenReports && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onOpenReports}
+            className="gap-1.5 text-xs h-8 border-primary/30 bg-primary/10 hover:bg-primary/20 text-primary shrink-0 self-start sm:self-auto"
+          >
+            <FileText className="h-3.5 w-3.5" />
+            <span>📰 บทวิเคราะห์รายวัน (Daily Report)</span>
+          </Button>
+        )}
       </CardHeader>
 
       <CardContent className="grid gap-3 pt-2 grid-cols-1 md:grid-cols-12">

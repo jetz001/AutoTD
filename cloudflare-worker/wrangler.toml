@@ -6,10 +6,11 @@ compatibility_date = "2024-12-01"
 assets = { directory = "./public", binding = "ASSETS" }
 
 # Cron triggers:
-# 1. ลูปเทรด: ปลุกวิเคราะห์ & เทรดทุก 30 นาที
-# 2. ลูป AI Discovery: ปลุกค้นหาโมเดล OpenRouter Free 6 ตัวล่าสุดทุกวัน
+# 1. ลูปเทรด: ปลุกวิเคราะห์ & เทรดทุก 15 นาที
+# 2. ลูปรายงานประจำวัน: สรุปผลเทรดและข่าว 00:00 เวลาไทย (17:00 UTC)
+# 3. ลูป AI Discovery: ปลุกค้นหาโมเดล OpenRouter Free 6 ตัวล่าสุดทุกวัน
 [triggers]
-crons = ["*/30 * * * *", "0 0 * * *"]
+crons = ["*/15 * * * *", "0 17 * * *", "0 0 * * *"]
 
 [[kv_namespaces]]
 binding = "AUTOTD_KV"

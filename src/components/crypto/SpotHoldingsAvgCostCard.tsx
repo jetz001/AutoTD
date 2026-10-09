@@ -391,13 +391,18 @@ export function SpotHoldingsAvgCostCard({
                         </div>
                       </td>
 
-                      {/* PnL % and $ */}
+                      {/* PnL % and $ (Gross & Net after Bitget 0.2% Fee) */}
                       <td className="py-2.5 px-2">
                         <div className={`font-mono font-bold ${isProfit ? "text-emerald-500" : "text-rose-500"}`}>
                           {isProfit ? "+" : ""}{pnlPct.toFixed(2)}%
                         </div>
                         <div className={`text-[10px] font-mono ${isProfit ? "text-emerald-500/80" : "text-rose-500/80"}`}>
                           {isProfit ? "+" : ""}${pnlUsdt.toFixed(2)}
+                        </div>
+                        <div className="text-[9px] font-mono text-muted-foreground mt-0.5" title="Net กำไรสุทธิหลังหักค่าธรรมเนียม Bitget Taker 0.1% ไป-กลับ (0.20%)">
+                          Net: <span className={(pnlPct - 0.20) >= 0 ? "text-emerald-400 font-semibold" : "text-rose-400 font-semibold"}>
+                            {(pnlPct - 0.20) >= 0 ? "+" : ""}{(pnlPct - 0.20).toFixed(2)}%
+                          </span>
                         </div>
                       </td>
 

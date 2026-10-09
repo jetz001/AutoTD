@@ -2,8 +2,10 @@ name: AutoTD 24/7 Autopilot Cloud Trader
 
 on:
   schedule:
-    # Run every 30 minutes continuously 24/7 on Microsoft Azure / AWS
-    - cron: '*/30 * * * *'
+    # Run every 15 minutes continuously 24/7 on Cloud Actions
+    - cron: '*/15 * * * *'
+    # Daily recap report at 00:00 Thai time (17:00 UTC)
+    - cron: '0 17 * * *'
   workflow_dispatch:
     inputs:
       action:

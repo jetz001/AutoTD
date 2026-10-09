@@ -48,6 +48,21 @@ export default {
   // 1. Cron Trigger: รองรับ 2 ลูป - ลูปเทรดทุก 5 นาที และ ลูปอัปเดตโมเดลฟรีวันละ 1 ครั้ง
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     const isDailyDiscovery = event.cron === "0 0 * * *" || event.cron?.includes("0 0");
+    const isDailyReport = event.cron === "0 17 * * *" || event.cron?.includes("0 17");
+
+    if (isDailyReport) {
+      ctx.waitUntil(
+        fetch("https://autotd.pages.dev/api/reports", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "generate" }),
+        }).then((r) => r.json()).then((res) => {
+          console.log("Daily report auto-generated successfully:", JSON.stringify(res));
+        }).catch((e: any) => console.warn("Daily report trigger notice:", e?.message))
+      );
+      return;
+    }
+
     if (isDailyDiscovery) {
       const aiKey = env.OPENROUTER_API_KEY || env.AI_API_KEY;
       ctx.waitUntil(refreshFreeModelsDaily(aiKey).catch((e: any) => console.warn("Discovery notice:", e?.message)));
