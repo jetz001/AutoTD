@@ -590,6 +590,9 @@ async function runAutopilotCycle() {
   // ==========================================
   const tpTarget = config.takeProfitPercent || 3.5;
   const slTarget = config.cutLossPercent || 5.0;
+  const jevKey = config.typesafeApiKey || process.env.TYPESAFE_API_KEY;
+  const groqKey = config.groqApiKey || process.env.GROQ_API_KEY;
+  const orKey = config.openrouterApiKey || process.env.OPENROUTER_API_KEY;
   let liveHoldingsConfig = Array.isArray(config.liveHoldings)
     ? config.liveHoldings.filter(lh => holdings.some(h => h.symbol === lh.symbol))
     : [];
@@ -1162,10 +1165,6 @@ async function runAutopilotCycle() {
       // Tier 3: OpenRouter (Free Tier Generative LLM Fallback)
       // Tier 4: Pure Quant Multi-Timeframe Confluence Heuristic
       let aiDecision = { action: 'BUY_SPOT', confidence: 85, reason: `Multi-Timeframe Confluence Grade ${best.grade}` };
-      const jevKey = config.typesafeApiKey || process.env.TYPESAFE_API_KEY;
-      const groqKey = config.groqApiKey || process.env.GROQ_API_KEY;
-      const orKey = config.openrouterApiKey || process.env.OPENROUTER_API_KEY;
-
       let aiApproved = true;
       let aiModelUsed = 'quant_multi_tf';
 
