@@ -1442,6 +1442,8 @@ const BITGET_QTY_PRECISION_MAP: Record<string, number> = {
   BTCUSDT: 6,
   ETHUSDT: 4,
   SOLUSDT: 4,
+  INJUSDT: 1,
+  QUSDT: 1,
   TAOUSDT: 3,
   ZECUSDT: 3,
   XRPUSDT: 4,
@@ -1454,12 +1456,18 @@ const BITGET_QTY_PRECISION_MAP: Record<string, number> = {
   LINKUSDT: 3,
   DOTUSDT: 2,
   BNBUSDT: 3,
+  BTWUSDT: 2,
+  DGAIUSDT: 2,
+  WLDUSDT: 2,
+  ENAUSDT: 1,
+  PEPEUSDT: 0,
 };
 
 export function getCoinPrecision(symbol: string): number {
-  if (BITGET_QTY_PRECISION_MAP[symbol]) return BITGET_QTY_PRECISION_MAP[symbol];
+  if (BITGET_QTY_PRECISION_MAP[symbol] !== undefined) return BITGET_QTY_PRECISION_MAP[symbol];
   if (symbol.includes('BTC')) return 6;
   if (symbol.includes('ETH') || symbol.includes('SOL')) return 4;
+  if (symbol.includes('INJ') || symbol.includes('QUSDT')) return 1;
   if (symbol.includes('TAO') || symbol.includes('ZEC') || symbol.includes('BNB')) return 3;
   if (symbol.includes('BGB') || symbol.includes('XRP') || symbol.includes('DOGE')) return 4;
   return 2;

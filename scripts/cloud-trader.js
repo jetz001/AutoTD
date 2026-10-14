@@ -77,6 +77,8 @@ const BITGET_QTY_PRECISION_MAP = {
   BTCUSDT: 6,
   ETHUSDT: 4,
   SOLUSDT: 4,
+  INJUSDT: 1,
+  QUSDT: 1,
   TAOUSDT: 3,
   ZECUSDT: 3,
   XRPUSDT: 4,
@@ -91,12 +93,37 @@ const BITGET_QTY_PRECISION_MAP = {
   BNBUSDT: 3,
   QNTUSDT: 4,
   KIIUSDT: 2,
+  BTWUSDT: 2,
+  DGAIUSDT: 2,
+  WLDUSDT: 2,
+  ENAUSDT: 1,
+  PEPEUSDT: 0,
 };
 
+let dynamicPrecisionCache = {};
+
+async function loadBitgetPrecisions() {
+  try {
+    const res = await fetch('https://api.bitget.com/api/v2/spot/public/symbols', { signal: AbortSignal.timeout(5000) });
+    if (res.ok) {
+      const d = await res.json();
+      if (d.code === '00000' && Array.isArray(d.data)) {
+        d.data.forEach(s => {
+          if (s.symbol && s.quantityPrecision !== undefined) {
+            dynamicPrecisionCache[s.symbol] = parseInt(s.quantityPrecision);
+          }
+        });
+      }
+    }
+  } catch {}
+}
+
 function getCoinPrecision(symbol) {
-  if (BITGET_QTY_PRECISION_MAP[symbol]) return BITGET_QTY_PRECISION_MAP[symbol];
+  if (dynamicPrecisionCache[symbol] !== undefined) return dynamicPrecisionCache[symbol];
+  if (BITGET_QTY_PRECISION_MAP[symbol] !== undefined) return BITGET_QTY_PRECISION_MAP[symbol];
   if (symbol.includes('BTC')) return 6;
   if (symbol.includes('ETH') || symbol.includes('SOL')) return 4;
+  if (symbol.includes('INJ') || symbol.includes('QUSDT')) return 1;
   if (symbol.includes('TAO') || symbol.includes('ZEC') || symbol.includes('BNB')) return 3;
   if (symbol.includes('BGB') || symbol.includes('XRP') || symbol.includes('DOGE')) return 4;
   return 2;
@@ -325,6 +352,9 @@ async function runAutopilotCycle() {
       priceMap[t.symbol] = parseFloat(t.lastPr);
     }
   }
+
+  // Load latest symbol quantity precisions dynamically from Bitget
+  await loadBitgetPrecisions();
 
   // 3. Fetch Real Assets: REST first, then WebSocket
   let assetData = await fetchRealBitgetAssetsViaRest(config);
