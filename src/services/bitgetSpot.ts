@@ -610,30 +610,45 @@ export async function executeRealBitgetOrder(
     }
   }
 
-  // 1. First priority: 24/7 Cloud Trade Dispatcher (Runs on Microsoft Azure Cloud runner, zero local PC required)
-  try {
-    const cloudRes = await fetch('/api/cloud-trade', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: order.side,
-        symbol: order.symbol,
-        amount: order.size,
-      }),
-      signal: AbortSignal.timeout(5000),
-    });
-    if (cloudRes.ok) {
-      const cJson = await cloudRes.json();
-      if (cJson.success) {
+  const isBrowserEnv = typeof window !== 'undefined' && typeof window.document !== 'undefined';
+
+  // 1. First priority in Browser: Direct Cloudflare Pages Proxy (Executes synchronously in ~150ms against Bitget)
+  if (isBrowserEnv) {
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (activeConfig?.apiKey) headers['x-bitget-key'] = activeConfig.apiKey;
+      if (activeConfig?.secretKey) headers['x-bitget-secret'] = activeConfig.secretKey;
+      if (activeConfig?.passphrase) headers['x-bitget-passphrase'] = activeConfig.passphrase;
+
+      const res = await fetch('/api/bitget', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(order),
+        signal: AbortSignal.timeout(8000),
+      });
+      const json = await res.json();
+      if (res.ok && json.code === '00000') {
         return {
           success: true,
-          data: { orderId: `cloud_${Date.now()}` },
-          message: cJson.message,
+          data: json.data,
+          message: `✓ [Bitget Spot Proxy] ส่งคำสั่งสำเร็จ: orderId=${json.data?.orderId || 'ok'}`,
+        };
+      } else if (json.code === '43012') {
+        return {
+          success: false,
+          message: `🚨 ยอดเงิน USDT ในกระเป๋า Spot ไม่เพียงพอ (Bitget Error 43012: Insufficient balance)`,
+        };
+      } else if (json.code) {
+        return {
+          success: false,
+          message: `Bitget API (${json.code}): ${json.msg || 'Order failed'}`,
         };
       }
+    } catch (proxyErr) {
+      console.warn('Bitget proxy order failed, attempting fallback:', proxyErr);
     }
-  } catch (cloudErr) {
-    console.warn('Cloud trade dispatcher failed, checking alternatives:', cloudErr);
   }
 
   // 2. Second priority: AutoTD Local Bridge (If user runs local bridge on host machine)
@@ -671,41 +686,30 @@ export async function executeRealBitgetOrder(
     }
   } catch {}
 
-  // 3. Priority in Browser: Cloudflare Pages Proxy Endpoint (Avoids CORS preflight failures on custom headers)
-  const isBrowserEnv = typeof window !== 'undefined' && typeof window.document !== 'undefined';
-  if (isBrowserEnv) {
-    try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (activeConfig?.apiKey) headers['x-bitget-key'] = activeConfig.apiKey;
-      if (activeConfig?.secretKey) headers['x-bitget-secret'] = activeConfig.secretKey;
-      if (activeConfig?.passphrase) headers['x-bitget-passphrase'] = activeConfig.passphrase;
-
-      const res = await fetch('/api/bitget', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(order),
-      });
-      const json = await res.json();
-      if (res.ok && json.code === '00000') {
+  // 3. Fallback: 24/7 Cloud Trade Dispatcher (Runs asynchronously via GitHub Actions workflow)
+  try {
+    const cloudRes = await fetch('/api/cloud-trade', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: order.side,
+        symbol: order.symbol,
+        amount: order.size,
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (cloudRes.ok) {
+      const cJson = await cloudRes.json();
+      if (cJson.success) {
         return {
           success: true,
-          data: json.data,
-          message: `✓ [Bitget Spot Proxy] ส่งคำสั่งสำเร็จ: orderId=${json.data?.orderId || 'ok'}`,
-        };
-      } else if (json.code === '43012') {
-        return {
-          success: false,
-          message: `🚨 ยอดเงิน USDT ในกระเป๋า Spot ไม่เพียงพอ (Bitget Error 43012: Insufficient balance)`,
-        };
-      } else if (json.code) {
-        return {
-          success: false,
-          message: `Bitget API (${json.code}): ${json.msg || 'Order failed'}`,
+          data: { orderId: `cloud_${Date.now()}` },
+          message: cJson.message,
         };
       }
-    } catch {}
+    }
+  } catch (cloudErr) {
+    console.warn('Cloud trade dispatcher failed:', cloudErr);
   }
 
   // 4. Fallback: Direct WebCrypto request (for desktop/Node/Electron where cross-origin CORS is not enforced)
@@ -1094,15 +1098,18 @@ export async function fetchRealBitgetHoldings(
       let history = costMap[sym]?.history || [];
       const meta = costMap[sym];
 
-      // If avgCost is missing or matches market price exactly, fetch real filled buy order from Bitget!
-      if ((avgCost <= 0 || avgCost === price) && config?.apiKey) {
+      let latestBuyTimestamp = 0;
+      // Fetch real filled buy order from Bitget to sync true entry time & avg cost
+      if (config?.apiKey) {
         try {
           const orders = await fetchRealBitgetOrderHistory(config, sym);
           const buyOrders = orders.filter(o => o.side.toLowerCase() === 'buy' && (o.status === 'filled' || o.status === 'partially_filled'));
           if (buyOrders.length > 0) {
             const lastBuy = buyOrders[0];
             const p = parseFloat(lastBuy.priceAvg || lastBuy.price || '0');
-            if (p > 0) {
+            const buyTime = Number(lastBuy.cTime || '0');
+            if (buyTime > 0) latestBuyTimestamp = buyTime;
+            if ((avgCost <= 0 || avgCost === price) && p > 0) {
               avgCost = p;
               history = [{ price: p, amount: a.available, time: lastBuy.cTime ? new Date(Number(lastBuy.cTime)).toLocaleTimeString('th-TH') : 'Bitget Spot' }];
             }
@@ -1138,9 +1145,9 @@ export async function fetchRealBitgetHoldings(
       const defaultHoldMinutes = targetTimeframe === '5m' ? 90 : targetTimeframe === '1h' ? 360 : 180;
       const maxHoldMinutes = meta?.maxHoldMinutes || defaultHoldMinutes;
 
-      const entryTimestamp = meta?.entryTimestamp && meta.entryTimestamp > 0
-        ? meta.entryTimestamp
-        : Date.now();
+      const entryTimestamp = latestBuyTimestamp > 0
+        ? latestBuyTimestamp
+        : (meta?.entryTimestamp && meta.entryTimestamp > 0 ? meta.entryTimestamp : Date.now());
 
       realHoldings.push({
         symbol: sym,

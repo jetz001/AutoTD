@@ -390,38 +390,42 @@ export function CryptoPageClient() {
             // 5.1 AUTO-SELL: CUT LOSS (100% Market Sell + 3h Cooldown)
             if (decision.action === "CUT_LOSS") {
               const res = await executeSpotSell(decision.symbol, decision.price, true, config)
-              setHoldings(res.updatedHoldings)
-              setActionAlert(`🚨 [AUTO CUT-LOSS] ${res.message}`)
-              setTimeout(() => setActionAlert(null), 5000)
+              if (res.success) {
+                setHoldings(res.updatedHoldings)
+                setActionAlert(`🚨 [AUTO CUT-LOSS] ${res.message}`)
+                setTimeout(() => setActionAlert(null), 5000)
 
-              const newLog = {
-                id: Date.now().toString(),
-                time: new Date().toLocaleTimeString(),
-                action: config.isPaperTrading ? "🚨 [AUTO] CUT LOSS" : "🔥🚨 [LIVE] CUT LOSS",
-                symbol: decision.symbol,
-                note: `${decision.reason} | ดึงเงินสดกลับกระเป๋าทันที`,
-                color: "#ef4444",
+                const newLog = {
+                  id: Date.now().toString(),
+                  time: new Date().toLocaleTimeString(),
+                  action: config.isPaperTrading ? "🚨 [AUTO] CUT LOSS" : "🔥🚨 [LIVE] CUT LOSS",
+                  symbol: decision.symbol,
+                  note: `${decision.reason} | ดึงเงินสดกลับกระเป๋าทันที`,
+                  color: "#ef4444",
+                }
+                const logs = [newLog, ...loadQuantLogs(config.isPaperTrading)]
+                saveQuantLogs(logs, config.isPaperTrading)
               }
-              const logs = [newLog, ...loadQuantLogs(config.isPaperTrading)]
-              saveQuantLogs(logs, config.isPaperTrading)
             }
             // 5.2 AUTO-SELL: TAKE PROFIT (100% Market Sell on target)
             else if (decision.action === "TAKE_PROFIT") {
               const res = await executeSpotSell(decision.symbol, decision.price, false, config)
-              setHoldings(res.updatedHoldings)
-              setActionAlert(`🎯 [AUTO TAKE-PROFIT] ${res.message}`)
-              setTimeout(() => setActionAlert(null), 5000)
+              if (res.success) {
+                setHoldings(res.updatedHoldings)
+                setActionAlert(`🎯 [AUTO TAKE-PROFIT] ${res.message}`)
+                setTimeout(() => setActionAlert(null), 5000)
 
-              const newLog = {
-                id: Date.now().toString(),
-                time: new Date().toLocaleTimeString(),
-                action: config.isPaperTrading ? "🎯 [AUTO] TAKE PROFIT" : "🔥🎯 [LIVE] TAKE PROFIT",
-                symbol: decision.symbol,
-                note: `${decision.reason} | ล็อคกำไรสำเร็จ`,
-                color: "#10b981",
+                const newLog = {
+                  id: Date.now().toString(),
+                  time: new Date().toLocaleTimeString(),
+                  action: config.isPaperTrading ? "🎯 [AUTO] TAKE PROFIT" : "🔥🎯 [LIVE] TAKE PROFIT",
+                  symbol: decision.symbol,
+                  note: `${decision.reason} | ล็อคกำไรสำเร็จ`,
+                  color: "#10b981",
+                }
+                const logs = [newLog, ...loadQuantLogs(config.isPaperTrading)]
+                saveQuantLogs(logs, config.isPaperTrading)
               }
-              const logs = [newLog, ...loadQuantLogs(config.isPaperTrading)]
-              saveQuantLogs(logs, config.isPaperTrading)
             }
             // 5.2.1 AUTO TIME-EXTEND: Automatically extend holding time & update to new active strategy label
             else if (decision.action === "TIME_EXTEND") {
@@ -453,20 +457,22 @@ export function CryptoPageClient() {
             // 5.2.2 AUTO TIME-CLOSE: Market sell to liquidate expired stagnant holding
             else if (decision.action === "TIME_CLOSE") {
               const res = await executeSpotSell(decision.symbol, decision.price, false, config)
-              setHoldings(res.updatedHoldings)
-              setActionAlert(`⏱️🛑 [TIME-STOP] ${res.message}`)
-              setTimeout(() => setActionAlert(null), 5000)
+              if (res.success) {
+                setHoldings(res.updatedHoldings)
+                setActionAlert(`⏱️🛑 [TIME-STOP] ${res.message}`)
+                setTimeout(() => setActionAlert(null), 5000)
 
-              const newLog = {
-                id: Date.now().toString(),
-                time: new Date().toLocaleTimeString(),
-                action: "⏱️🛑 [TIME-STOP CLOSE]",
-                symbol: decision.symbol,
-                note: `${decision.reason} | ขายปิดตลาดดึงเงินสดกลับกระเป๋า`,
-                color: "#f59e0b",
+                const newLog = {
+                  id: Date.now().toString(),
+                  time: new Date().toLocaleTimeString(),
+                  action: "⏱️🛑 [TIME-STOP CLOSE]",
+                  symbol: decision.symbol,
+                  note: `${decision.reason} | ขายปิดตลาดดึงเงินสดกลับกระเป๋า`,
+                  color: "#f59e0b",
+                }
+                const logs = [newLog, ...loadQuantLogs(config.isPaperTrading)]
+                saveQuantLogs(logs, config.isPaperTrading)
               }
-              const logs = [newLog, ...loadQuantLogs(config.isPaperTrading)]
-              saveQuantLogs(logs, config.isPaperTrading)
             }
             // 5.2.3 AUTO REVISE TARGET: Dynamically update TP and SL per individual coin based on AI/Quant scan
             else if (decision.action === "REVISE_TARGET") {
