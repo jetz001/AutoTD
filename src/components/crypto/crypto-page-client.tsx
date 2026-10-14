@@ -473,7 +473,8 @@ export function CryptoPageClient() {
               await handleUpdateHoldingParams(decision.symbol, {
                 takeProfitPrice: decision.newTp,
                 trailingSlPrice: decision.newSl,
-              })
+                lastReviseTimestamp: Date.now(),
+              }, false)
 
               const newLog = {
                 id: Date.now().toString(),
@@ -684,9 +685,9 @@ export function CryptoPageClient() {
     return () => clearInterval(cloudInterval)
   }, [config.isPaperTrading])
 
-  // Manual Target, Time-Stop, and Lock Adjustment Handler
+  // Target, Time-Stop, and Lock Adjustment Handler
   const handleUpdateHoldingParams = React.useCallback(
-    async (symbol: string, updates: Partial<SpotHolding>) => {
+    async (symbol: string, updates: Partial<SpotHolding>, isManual: boolean = false) => {
       setHoldings((prev) => {
         const updated = prev.map((h) => (h.symbol === symbol ? { ...h, ...updates } : h))
         saveSpotHoldings(updated, config.isPaperTrading ?? true)
@@ -702,8 +703,10 @@ export function CryptoPageClient() {
         return updated
       })
 
-      setActionAlert(`⚙️ ปรับแต่งเป้าหมายของ ${symbol} เรียบร้อยแล้ว`)
-      setTimeout(() => setActionAlert(null), 3500)
+      if (isManual) {
+        setActionAlert(`⚙️ ปรับแต่งเป้าหมายของ ${symbol} เรียบร้อยแล้ว`)
+        setTimeout(() => setActionAlert(null), 3500)
+      }
     },
     [config.isPaperTrading]
   )
@@ -1054,7 +1057,7 @@ export function CryptoPageClient() {
           config={config}
           onSellHolding={handleSellHolding}
           onSelectSymbol={setSelectedSymbol}
-          onUpdateHolding={handleUpdateHoldingParams}
+          onUpdateHolding={(sym, updates) => handleUpdateHoldingParams(sym, updates, true)}
         />
       </div>
 

@@ -46,6 +46,7 @@ export interface SpotHolding {
   trailingSlPrice?: number;
   breakevenLocked?: boolean;
   manualLock?: boolean;
+  lastReviseTimestamp?: number;
 }
 
 export function sanitizeHolding(h: any, livePrice?: number): SpotHolding {
@@ -1029,6 +1030,9 @@ export async function fetchRealBitgetHoldings(
     trailingSlPrice?: number;
     breakevenLocked?: boolean;
     manualLock?: boolean;
+    takeProfitPrice?: number;
+    cutLossPrice?: number;
+    lastReviseTimestamp?: number;
   }> = {};
 
   // 1. Merge metadata from config.liveHoldings (from Cloudflare D1) first
@@ -1046,6 +1050,9 @@ export async function fetchRealBitgetHoldings(
           trailingSlPrice: h.trailingSlPrice,
           breakevenLocked: h.breakevenLocked,
           manualLock: h.manualLock,
+          takeProfitPrice: h.takeProfitPrice,
+          cutLossPrice: h.cutLossPrice,
+          lastReviseTimestamp: h.lastReviseTimestamp,
         };
       }
     }
@@ -1066,6 +1073,9 @@ export async function fetchRealBitgetHoldings(
         trailingSlPrice: h.trailingSlPrice || costMap[h.symbol]?.trailingSlPrice,
         breakevenLocked: h.breakevenLocked ?? costMap[h.symbol]?.breakevenLocked,
         manualLock: h.manualLock ?? costMap[h.symbol]?.manualLock,
+        takeProfitPrice: h.takeProfitPrice || costMap[h.symbol]?.takeProfitPrice,
+        cutLossPrice: h.cutLossPrice || costMap[h.symbol]?.cutLossPrice,
+        lastReviseTimestamp: h.lastReviseTimestamp || costMap[h.symbol]?.lastReviseTimestamp,
       };
     }
   }
@@ -1142,8 +1152,8 @@ export async function fetchRealBitgetHoldings(
         currentPrice: price,
         unrealizedPnlUsdt: parseFloat(unPnl.toFixed(2)),
         pnlPercent: parseFloat(pnlPct.toFixed(2)),
-        takeProfitPrice: parseFloat((avgCost * (1 + tpTarget / 100)).toFixed(4)),
-        cutLossPrice: parseFloat((avgCost * (1 - slTarget / 100)).toFixed(4)),
+        takeProfitPrice: meta?.takeProfitPrice || parseFloat((avgCost * (1 + tpTarget / 100)).toFixed(4)),
+        cutLossPrice: meta?.cutLossPrice || parseFloat((avgCost * (1 - slTarget / 100)).toFixed(4)),
         isPaper: false,
         history: history.length > 0 ? history : [{ price: avgCost, amount: a.available, time: 'Bitget Spot' }],
         entryTimestamp,
@@ -1153,6 +1163,7 @@ export async function fetchRealBitgetHoldings(
         trailingSlPrice: meta?.trailingSlPrice,
         breakevenLocked: meta?.breakevenLocked,
         manualLock: meta?.manualLock,
+        lastReviseTimestamp: meta?.lastReviseTimestamp,
       });
     }
   }

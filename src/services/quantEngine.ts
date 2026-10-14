@@ -345,6 +345,11 @@ export function runQuantPortfolioCheck(
       let newSl = h.trailingSlPrice || h.cutLossPrice;
       let reviseReason = '';
 
+      // Lead Time / Cooldown: At least 3 minutes (180s) between target adjustments to prevent rapid flickering
+      const now = Date.now();
+      const lastRevise = h.lastReviseTimestamp || 0;
+      const isReviseCooldown = (now - lastRevise) < 180000;
+
       // Breakeven check (+1.2%)
       if (pnlPct >= 1.2 && (!h.breakevenLocked || newSl <= h.avgCostPrice)) {
         const bePrice = parseFloat((h.avgCostPrice * 1.002).toFixed(6));
@@ -356,7 +361,7 @@ export function runQuantPortfolioCheck(
       }
 
       // Momentum Expansion check
-      if ((matchedCand.aiScore || 0) >= 75 && pnlPct >= 1.8) {
+      if (!isReviseCooldown && (matchedCand.aiScore || 0) >= 75 && pnlPct >= 1.8) {
         const expandedTp = parseFloat((h.currentPrice * 1.035).toFixed(6));
         if (expandedTp > newTp * 1.005) {
           const oldTpVal = newTp;
@@ -366,9 +371,9 @@ export function runQuantPortfolioCheck(
         }
       }
       // Overbought Tighten check
-      else if ((matchedCand.rsi15m || 0) > 75 && pnlPct >= 2.0) {
+      else if (!isReviseCooldown && (matchedCand.rsi15m || 0) > 75 && pnlPct >= 2.0) {
         const tightenTp = parseFloat((h.currentPrice * 1.003).toFixed(6));
-        if (tightenTp < newTp) {
+        if (tightenTp < newTp * 0.997) {
           const oldTpVal = newTp;
           newTp = tightenTp;
           shouldRevise = true;
