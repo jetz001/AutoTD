@@ -244,8 +244,29 @@ export function isUnderCooldown(symbol: string): boolean {
 // Fetch Top 20 Bitget Spot Tickers
 export async function fetchTopBitgetSpotTickers(): Promise<SpotTickerItem[]> {
   try {
-    const res = await fetch('https://api.bitget.com/api/v2/spot/market/tickers');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    let res: Response | null = null;
+    try {
+      res = await fetch('https://api.bitget.com/api/v2/spot/market/tickers', {
+        signal: AbortSignal.timeout(3500),
+      });
+    } catch {
+      // Direct connection timed out or blocked by ISP -> Fallback to Cloudflare proxy
+      try {
+        res = await fetch('/api/bitget?action=tickers', {
+          signal: AbortSignal.timeout(5000),
+        });
+      } catch {}
+    }
+
+    if (!res || !res.ok) {
+      try {
+        res = await fetch('/api/bitget?action=tickers', {
+          signal: AbortSignal.timeout(5000),
+        });
+      } catch {}
+    }
+
+    if (!res || !res.ok) throw new Error(`HTTP ${res?.status || 'network'}`);
     const json = await res.json();
     if (json.code !== '00000' || !Array.isArray(json.data)) return [];
 
@@ -316,16 +337,25 @@ export async function fetchBitgetSpotCandles(
   const fetchPromise = (async () => {
     try {
       const directUrl = `https://api.bitget.com/api/v2/spot/market/candles?symbol=${symbol}&granularity=${granularity}&limit=${limit}`;
-      let res = await fetch(directUrl);
+      const proxyUrl = `/api/bitget?action=candles&symbol=${symbol}&granularity=${granularity}&limit=${limit}`;
+      
+      let res: Response | null = null;
+      try {
+        res = await fetch(directUrl, { signal: AbortSignal.timeout(3500) });
+      } catch {
+        // Direct request timed out or ISP blocked -> fallback to Cloudflare proxy
+        try {
+          res = await fetch(proxyUrl, { signal: AbortSignal.timeout(6000) });
+        } catch {}
+      }
 
-      // If rate-limited (HTTP 429), try falling back to Pages proxy
-      if (res.status === 429) {
-        if (cached?.candles?.length) {
+      // If rate-limited (HTTP 429) or non-200, try falling back to Pages proxy
+      if (!res || !res.ok || res.status === 429) {
+        if (cached?.candles?.length && (!res || res.status === 429)) {
           return cached.candles; // Use stale cache on 429
         }
         try {
-          const proxyUrl = `/api/bitget?action=candles&symbol=${symbol}&granularity=${granularity}&limit=${limit}`;
-          const proxyRes = await fetch(proxyUrl);
+          const proxyRes = await fetch(proxyUrl, { signal: AbortSignal.timeout(6000) });
           if (proxyRes.ok) {
             res = proxyRes;
           }
@@ -960,8 +990,22 @@ export async function fetchRealBitgetHoldings(
   // Fetch full market tickers to get prices for all user coins (e.g. MOODENG, NS, BGB)
   let fullPriceMap: Record<string, number> = { ...(priceMap || {}) };
   try {
-    const tRes = await fetch('https://api.bitget.com/api/v2/spot/market/tickers');
-    if (tRes.ok) {
+    let tRes: Response | null = null;
+    try {
+      tRes = await fetch('https://api.bitget.com/api/v2/spot/market/tickers', { signal: AbortSignal.timeout(3500) });
+    } catch {
+      try {
+        tRes = await fetch('/api/bitget?action=tickers', { signal: AbortSignal.timeout(5000) });
+      } catch {}
+    }
+
+    if (!tRes || !tRes.ok) {
+      try {
+        tRes = await fetch('/api/bitget?action=tickers', { signal: AbortSignal.timeout(5000) });
+      } catch {}
+    }
+
+    if (tRes && tRes.ok) {
       const tJson = await tRes.json();
       if (tJson.code === '00000' && Array.isArray(tJson.data)) {
         for (const t of tJson.data) {

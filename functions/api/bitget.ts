@@ -108,6 +108,17 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       );
     }
 
+    if (action === "tickers") {
+      try {
+        const targetUrl = `${BITGET_HOST}/api/v2/spot/market/tickers`;
+        const res = await fetch(targetUrl);
+        const data = await res.json();
+        return Response.json(data, { headers: corsHeaders });
+      } catch (err: any) {
+        return Response.json({ code: "50000", msg: err.message }, { status: 500, headers: corsHeaders });
+      }
+    }
+
     if (action === "candles") {
       try {
         const symbol = url.searchParams.get("symbol") || "";

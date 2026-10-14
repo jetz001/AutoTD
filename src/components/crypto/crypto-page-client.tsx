@@ -110,6 +110,18 @@ export function CryptoPageClient() {
 
         if (Array.isArray(synced.screenerMatrix) && synced.screenerMatrix.length > 0) {
           setScreenerMatrix(synced.screenerMatrix)
+          setTickers((prev) => {
+            if (prev.length > 0) return prev
+            return synced.screenerMatrix.map((item: any) => ({
+              symbol: item.symbol,
+              baseCoin: item.symbol.replace("USDT", ""),
+              lastPr: item.price || 0,
+              change24h: item.change24h || 0,
+              high24h: item.price || 0,
+              low24h: item.price || 0,
+              usdtVolume: item.volume24h || 1000000,
+            }))
+          })
         }
 
         if (targetMode) {
