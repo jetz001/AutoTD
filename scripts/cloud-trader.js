@@ -522,9 +522,13 @@ async function runAutopilotCycle() {
     const targetSym = SYMBOL_INPUT.endsWith('USDT') ? SYMBOL_INPUT : `${SYMBOL_INPUT}USDT`;
     const targetBase = targetSym.replace('USDT', '');
     const foundAsset = assets.find(a => a.coin === targetBase);
-    if (foundAsset && foundAsset.available > 0) {
+    const targetTicker = tickers.find(t => t.symbol === targetSym);
+    const targetPrice = targetTicker ? targetTicker.lastPr : 0;
+    const estValUsd = foundAsset ? (foundAsset.available * (targetPrice || 1)) : 0;
+
+    if (foundAsset && foundAsset.available > 0 && estValUsd >= 1.0) {
       const sellSize = formatCoinAmount(foundAsset.available, targetSym);
-      console.log(`Executing on-demand sell for ${targetSym} (Size: ${sellSize})...`);
+      console.log(`Executing on-demand sell for ${targetSym} (Size: ${sellSize}, Est Val: $${estValUsd.toFixed(2)})...`);
       const sellRes = await placeBitgetOrder({
         symbol: targetSym,
         side: 'sell',
@@ -556,6 +560,17 @@ async function runAutopilotCycle() {
           color: '#ef4444'
         });
       }
+    } else if (foundAsset && foundAsset.available > 0 && estValUsd < 1.0) {
+      console.log(`[On-Demand Sell] ${targetSym} has already been sold (Remaining dust: $${estValUsd.toFixed(2)} < $1 USDT min order). Skipping order.`);
+      newLogs.push({
+        id: Date.now().toString(),
+        timestamp: Date.now(),
+        time: getThaiTimeString(),
+        action: 'ℹ️ [CLOUD SELL] เหรียญถูกขายแล้ว',
+        symbol: targetSym,
+        note: `เหรียญถูกขายออกไปแล้ว ยอดที่เหลือเป็นเพียงเศษ Dust ($${estValUsd.toFixed(2)} < ขั้นต่ำ $1 USDT ของ Bitget)`,
+        color: '#38bdf8'
+      });
     } else {
       console.log(`No available balance found to sell for ${targetSym}`);
     }

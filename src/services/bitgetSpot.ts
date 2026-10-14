@@ -1545,12 +1545,13 @@ export async function executeSpotSell(
   if (config && !config.isPaperTrading) {
     // Format precision dynamically with truncation and safety guard
     const sellSize = formatCoinAmount(h.totalAmount, symbol);
-    if (parseFloat(sellSize) <= 0) {
+    const estValueUsd = h.totalAmount * (currentPrice || h.currentPrice || 1);
+    if (parseFloat(sellSize) <= 0 || estValueUsd < 1.0) {
       return {
         success: false,
-        message: `🚨 จำนวนเหรียญ ${symbol} น้อยเกินไป (${h.totalAmount}) ไม่สามารถส่งคำสั่งขายได้`,
+        message: `ℹ️ เหรียญ ${symbol} ถูกขายออกไปแล้ว (ยอดที่เหลือ $${estValueUsd.toFixed(2)} ต่ำกว่าขั้นต่ำ $1 USDT ของ Bitget)`,
         realizedPnl: 0,
-        updatedHoldings: holdings,
+        updatedHoldings: holdings.filter(item => item.symbol !== symbol),
       };
     }
 
